@@ -1,0 +1,12 @@
+[data-panel="server"] { display: grid; align-content: start; gap: 14px; }
+.server-status { padding: 12px; border: 1px solid var(--line-2); border-radius: var(--radius); color: var(--ink-2); }
+.server-status.online { color: var(--gold-text); border-color: var(--gold-line); }
+.server-unlock, .server-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.server-unlock .input { flex: 1; min-width: min(100%, 160px); }
+.server-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 10px; }
+.server-card { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--bg-2); }
+.server-card strong { font-size: 22px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.server-label { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+.server-note, .server-services { color: var(--ink-3); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.server-chart { display: block; width: 100%; height: 54px; color: var(--gold); }
+.server-actions .btn { flex: 1; min-width: min(100%, 120px); justify-content: center; }

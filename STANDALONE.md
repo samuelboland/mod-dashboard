@@ -2,8 +2,10 @@
 
 The optional Node host serves the existing Living Azeroth UI while the realm is
 stopped. It reads published JSON and map files from disk and forwards the small
-live API to mod-dashboard. It does not open databases, run generators, or start
-and stop the realm. The C++ module and its existing hosting mode still work.
+live API to mod-dashboard. It does not open databases or run generators. An
+optional, separately configured control adapter can read server status and
+request start/stop through a local admin service. The C++ module and its
+existing hosting mode still work.
 
 ## Run
 
@@ -39,11 +41,33 @@ Do not point these settings at private ledgers or service state directories.
 | `DASHBOARD_WEB_ROOT` | Module's `web/` | Existing frontend assets |
 | `DASHBOARD_DATA_ROOT` | Unset | Published JSON root; absent files return 404 |
 | `DASHBOARD_MAP_ROOT` | Unset | Map art root; absent art uses existing fallback |
+| `DASHBOARD_CONTROL_URL` | Unset | HTTP(S) origin of a trusted local admin service |
+| `DASHBOARD_CONTROL_TOKEN` | Unset | At least 32 characters; required with the control URL |
+| `DASHBOARD_CONTROL_HOST_HEADER` | URL host | Override the admin service's expected Host header, if needed |
+
+When control is configured, the Server panel reads realm/container state and
+recent CPU and memory samples even while the realm is offline. Enter the control
+token in the panel to view status or request start/stop. The token is saved in
+this browser's local storage; use a dedicated random value and keep the
+dashboard on a trusted loopback/private origin. The host never returns the
+admin service's own session token to the browser. Its control routes accept
+only `GET /api/server/state`, `GET /api/server/job`, and a `POST /api/server/action`
+with `start` or `stop`; they require the control token and reject cross-origin
+browser requests. A start/stop request is not retried after uncertain delivery:
+check the job status before trying again. Without control configuration, these
+routes return 503 and the panel says management is not configured.
+
+The local admin service is a separate deployment prerequisite. Do not point
+`DASHBOARD_CONTROL_URL` at the worldserver dashboard, and do not expose the
+admin service itself on a public network. For Docker Desktop with the local
+admin on Windows port 8789, use `http://host.docker.internal:8789` as the URL
+and `127.0.0.1:8789` as the Host override. The standalone host needs no Docker
+socket mount.
 
 Command tokens stay in the browser and are verified by the worldserver. Nothing
 in this host stores them. A different port is a different browser origin, so
 existing browser preferences and tokens are not automatically transferred.
-Only pause/resume are forwarded, once per request. Unconfirmed delivery must be
+Only pause/resume world commands are forwarded, once per request. Unconfirmed delivery must be
 checked in command history before a user retries. Cross-origin command requests
 are rejected; no CORS access is added.
 
@@ -127,6 +151,7 @@ python tests/accounting_browser.py --browser edge
 ```
 
 The standalone test launches the real built host, a controllable local realm,
-and the full UI. It checks cold offline costs/lore, reconnect, map retry, snapshot
-age, disabled commands, and offline reload. No model calls or real game commands
-are made. Optional `--artifacts /outside/the/repository` saves screenshots.
+a fake admin service, and the full UI. It checks server controls and charts,
+cold offline costs/lore, reconnect, map retry, snapshot age, disabled commands,
+and offline reload. No model calls or real game commands are made. Optional
+`--artifacts /outside/the/repository` saves screenshots.

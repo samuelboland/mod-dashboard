@@ -12,6 +12,7 @@ export const PANELS = [
   { id: "market", icon: "coins", label: "Market", title: "Market", desc: "The auction houses: stalls, sales and what goods fetch" },
   { id: "costs", icon: "coins", label: "Costs", title: "Model costs", desc: "Recorded spending, usage and request purposes" },
   { id: "commands", icon: "terminal", label: "Commands", title: "Commands", desc: "Pause or resume a bot on the world server" },
+  { id: "server", icon: "activity", label: "Server", title: "Server", desc: "Realm status, resource use and lifecycle controls" },
   { id: "lore", icon: "scroll", label: "Lore", title: "Your own lore", desc: "Write your characters' story, and let the world check it" },
   { id: "memories", icon: "book", label: "Memories", title: "Memories", desc: "What the bots still carry: their deeds and what they made of them" },
   { id: "journey", icon: "route", label: "Journey", title: "A player's journey", desc: "Everything one character has done, in the order it happened" },
