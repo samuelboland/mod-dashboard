@@ -46,6 +46,8 @@ def main():
              file="", reload=""),
     ]
     changes = []
+    control = {"online": False, "job": None, "actions": []}
+    control_token = "fixture-control-token-0123456789abcdef"
     bot = dict(guid=18, name="Fixturebot", bot=True, level=12, **{"class": 1}, race=1,
                team=0, map=0, zone=12, zone_name="Elwynn Forest", map_name="Eastern Kingdoms",
                x=0, y=0, z=0, instance=False, combat=False, dead=False, mounted=False,
@@ -85,6 +87,50 @@ def main():
     realm = ThreadingHTTPServer(("127.0.0.1", 0), Realm)
     worker = threading.Thread(target=realm.serve_forever, daemon=True)
     worker.start()
+
+    class Admin(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def reply(self, value, code=200):
+            data = json.dumps(value).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            if self.path == "/api/state":
+                return self.reply(dict(time=int(time.time() * 1000), docker=True,
+                                       containers=[dict(name="hdm-workshop", Running=control["online"]),
+                                                   dict(name="hdm-database", Running=control["online"])],
+                                       samples=[dict(time=int(time.time() * 1000) - 15000, cpu=80.0,
+                                                     memory=1536 * 1024 ** 2),
+                                                dict(time=int(time.time() * 1000), cpu=125.5,
+                                                     memory=2 * 1024 ** 3)],
+                                       runtime=dict(worldReady=control["online"],
+                                                    services=dict(world="RUNNING" if control["online"] else "STOPPED"),
+                                                    cpuCount=16)))
+            if self.path == "/api/job":
+                return self.reply(control["job"])
+            if self.path == "/api/session":
+                return self.reply(dict(token="fixture-admin-session"))
+            return self.reply(dict(error="not found"), 404)
+
+        def do_POST(self):
+            if self.path != "/api/action" or self.headers.get("X-Admin-Token") != "fixture-admin-session":
+                return self.reply(dict(error="denied"), 403)
+            action = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            assert action["action"] in ("start", "stop")
+            control["actions"].append(action["action"])
+            control["online"] = action["action"] == "start"
+            control["job"] = dict(id=str(len(control["actions"])), action=action["action"], status="done")
+            return self.reply(control["job"], 202)
+
+    admin = ThreadingHTTPServer(("127.0.0.1", 0), Admin)
+    admin_worker = threading.Thread(target=admin.serve_forever, daemon=True)
+    admin_worker.start()
     try:
         with tempfile.TemporaryDirectory(prefix="standalone-browser-") as temp:
             directory = Path(temp)
@@ -97,7 +143,9 @@ def main():
                 port = sock.getsockname()[1]
             env = dict(os.environ, DASHBOARD_PORT=str(port), DASHBOARD_DATA_ROOT=temp,
                        DASHBOARD_WEB_ROOT=str(ROOT / "web"),
-                       DASHBOARD_WORLD_URL=f"http://127.0.0.1:{realm.server_port}")
+                       DASHBOARD_WORLD_URL=f"http://127.0.0.1:{realm.server_port}",
+                       DASHBOARD_CONTROL_URL=f"http://127.0.0.1:{admin.server_port}",
+                       DASHBOARD_CONTROL_TOKEN=control_token)
             with (directory / "host.log").open("w") as log:
                 process = subprocess.Popen(["node", "dist/main.js"], cwd=ROOT / "standalone", env=env,
                                            stdout=log, stderr=log,
@@ -145,9 +193,24 @@ def main():
                         # Reload while disconnected: saved data works without an in-memory snapshot.
                         driver.get(url + "/#costs")
                         wait.until(lambda d: d.find_elements(By.CSS_SELECTOR, ".cost-request"))
+                        driver.find_element(By.CSS_SELECTOR, '[aria-label="Close costs"]').click()
+                        driver.execute_async_script("const done=arguments[0];import('./js/actions.js').then(a=>{a.setPanel('server');done(true)});")
+                        server_panel = driver.find_element(By.CSS_SELECTOR, '[data-panel="server"]')
+                        server_panel.find_element(By.CSS_SELECTOR, 'input[aria-label="Server control token"]').send_keys(control_token)
+                        server_panel.find_element(By.XPATH, './/button[normalize-space()="Connect"]').click()
+                        wait.until(lambda d: "Realm: Stopped" in server_panel.text and "125.5%" in server_panel.text)
+                        assert server_panel.find_element(By.CSS_SELECTOR, "svg.server-chart").get_attribute("namespaceURI") == "http://www.w3.org/2000/svg"
+                        if args.artifacts:
+                            driver.save_screenshot(str(args.artifacts / "server-control.png"))
+                        server_panel.find_element(By.XPATH, './/button[contains(.,"Start realm")]').click()
+                        wait.until(lambda d: control["actions"] == ["start"])
+                        wait.until(lambda d: "Realm: Online" in server_panel.text)
+                        driver.execute_script("window.confirm = () => true")
+                        server_panel.find_element(By.XPATH, './/button[contains(.,"Stop realm")]').click()
+                        wait.until(lambda d: control["actions"] == ["start", "stop"])
+                        wait.until(lambda d: "Realm: Stopped" in server_panel.text)
                         status["online"] = True
                         wait.until(lambda d: "Live" in d.find_element(By.CSS_SELECTOR, ".conn").get_attribute("textContent"))
-                        driver.find_element(By.CSS_SELECTOR, '[aria-label="Close costs"]').click()
                         driver.execute_async_script("const done=arguments[0];import('./js/state.js').then(({state})=>{state.token='fixture-command-token';done(true)});")
                         driver.execute_async_script("const done=arguments[0];import('./js/actions.js').then(a=>{a.clearSelection();a.setPanel('settings');done(true)});")
                         wait.until(lambda d: d.find_elements(By.CSS_SELECTOR, '[data-panel="settings"] .setting'))
@@ -170,7 +233,7 @@ def main():
                         errors = [entry["message"] for entry in driver.get_log("browser")
                                   if "handler failed" in entry["message"] or "Uncaught" in entry["message"]]
                         assert not errors, errors
-                        print("PASS offline/reconnect behavior, playerbot settings, authenticated save, read-only keys and desktop/mobile layout")
+                        print("PASS server controls, settings saves, read-only settings, desktop/mobile layout and offline/reconnect behavior")
                 finally:
                     process.terminate()
                     process.wait(timeout=10)
@@ -178,6 +241,9 @@ def main():
         realm.shutdown()
         realm.server_close()
         worker.join()
+        admin.shutdown()
+        admin.server_close()
+        admin_worker.join()
 
 
 if __name__ == "__main__":
