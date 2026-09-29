@@ -10,6 +10,7 @@
 //   focus (player), focus-zone (zone id), mapcounts ({ total, counts, perMap }), focus-search
 //   chronicle-faction (the scribe being read), open-chronicle ({ mine } shows the full-screen reader, mine: the player's own)
 //   open-groups ({ key } shows the wall of bot companies, key: one company's own map and talk)
+//   rumours (data file), rumour-focus ({ scroll }) the story on the map changed, rumour-replay draws its spread again
 
 export function localGet(key) { try { return localStorage.getItem("dash." + key); } catch { return null; } }
 export function localSet(key, value) { try { localStorage.setItem("dash." + key, value); } catch {} }
@@ -25,7 +26,8 @@ export const state = {
   lore: null,             // data/lore.json from gen_backstories.py
   companies: null,        // data/companies.json from regard.py (plan 14)
   chronicle: null,        // data/chronicle.json from chronicler.py (plan 19)
-  accounting: null,
+  rumours: null,          // data/rumours.json from chronicler.py (overheard.py): stories, their spread, who passed them on
+  accounting: null,       // data/accounting.json from accounting.export: model request costs (Costs page)
   accountingError: "",
   market: null,           // data/market.json from market.py (plan 17 §3.E)
   chat: null,             // data/chat.json from regard.py: the party lines, for the Groups panel
@@ -37,7 +39,7 @@ export const state = {
   archive: new Map(),     // "moments" | "talks" | "ranked" -> { stamp, doc }: the whole of a list, on demand
   commands: null,         // GET /commands
   history: { bots: [], avg: [] },
-  conn: { ok: false, ts: 0, text: "Connecting…" },
+  conn: { ok: false, ts: 0, seen: 0, text: "Connecting…" }, // seen: browser ms of the last fresh snapshot
 
   // UI
   theme: localGet("theme") === "light" ? "light" : "dark",
@@ -48,6 +50,9 @@ export const state = {
   chronicleFaction: localGet("chronicle") || "A",
   chronicleHouse: localGet("house") || "",   // whose own chronicle: a main guid from chronicle.json households
   rosterView: localGet("roster") || "notable",
+  rumourSide: localGet("rside") || "all",   // "all" | "A" | "H"
+  rumourSort: localGet("rsort") || "new",
+  rumourRoot: null,       // the story drawn on the map (its first telling's id), null: where word is now
   query: "",
   token: localGet("token") || "",
   layers: {

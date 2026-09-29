@@ -10,7 +10,7 @@ const JOURNEY_MS = 60000;  // the journeys are rebuilt on the same ten-minute ca
 const HISTORY = 90;   // samples kept for the top-bar sparklines (3 minutes at 2 s)
 
 async function getJSON(url) {
-  const res = await fetch(url, { cache: "no-store" });
+  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(res.status === 503 ? "snapshot not ready" : `HTTP ${res.status}`);
   return res.json();
 }
@@ -24,14 +24,16 @@ function loop(fn, ms) {
 
 const push = (arr, v) => { arr.push(v); if (arr.length > HISTORY) arr.shift(); };
 
-export async function loadStatic() {
+export async function refreshWorldmap() {
   try {
     state.worldmap = await getJSON("worldmap");
-  } catch (e) {
-    state.conn = { ok: false, ts: 0, text: `could not load zone data (${e.message})` };
-    emit("conn");
-  }
+    emit("continent", { fit: true });
+  } catch { /* Retried with live polling until the realm becomes available. */ }
+}
+
+export async function loadStatic() {
   try { state.mapArt = await getJSON("maps/manifest.json"); } catch { state.mapArt = []; }
+  emit("continent", { fit: false });
 }
 
 export async function refreshCommands() {
@@ -112,24 +114,9 @@ export function refreshAccounting() {
 
 export function startPolling() {
   loop(refreshAccounting, DATA_MS);
-  loop(async () => {
-    try {
-      const snap = await getJSON("bots");
-      state.snap = snap;
-      state.players = snap.players;
-      state.byGuid = new Map(snap.players.map(p => [p.guid, p]));
-      push(state.history.bots, snap.counts.bots);
-      push(state.history.avg, snap.update_ms.avg);
-      state.conn = { ok: true, ts: snap.ts, text: "" };
-      emit("snapshot");
-      if (state.panel === "commands" && state.dockOpen) refreshCommands();
-    } catch (e) {
-      state.conn = { ok: false, ts: state.conn.ts, text: e.message };
-    }
-    emit("conn");
-  }, REFRESH_MS);
+  loop(refreshLive, REFRESH_MS);
 
-  // Data files are rewritten by the Python services; redraw only when a new one was generated.
+  // Data files are rewritten by services; these remain readable without the realm.
   const stampOf = doc => doc.generated ?? doc.generated_at;
   const watch = (url, key, ms) => loop(async () => {
     const next = await getJSON(url);
@@ -141,10 +128,40 @@ export function startPolling() {
   watch("data/regard.json", "regard", DATA_MS);
   watch("data/companies.json", "companies", DATA_MS);
   watch("data/chronicle.json", "chronicle", DATA_MS);
+  watch("data/rumours.json", "rumours", DATA_MS);
   watch("data/lore.json", "lore", LORE_MS);
   watch("data/lore-edit.json", "loreEdit", DATA_MS);
   watch("data/market.json", "market", MARKET_MS);
   watch("data/chat.json", "chat", DATA_MS);
   watch("data/memories.json", "memories", DATA_MS);
   watch("data/journeys.json", "journeys", JOURNEY_MS);
+}
+
+// Staleness is judged on this browser's clock alone: how long since the snapshot last changed.
+// Comparing snap.ts with Date.now() would mark a live realm dead from a viewer whose clock is off.
+const STALE_MS = 30000;
+let lastTs = null, lastChange = 0;
+
+export async function refreshLive() {
+  try {
+    const snap = await getJSON("bots");
+    if (!Number.isFinite(snap.ts)) throw new Error("world snapshot has no time");
+    const now = Date.now();
+    if (snap.ts !== lastTs) { lastTs = snap.ts; lastChange = now; }
+    else if (now - lastChange > STALE_MS) throw new Error("world snapshot is stale");
+    state.snap = snap;
+    state.players = snap.players;
+    state.byGuid = new Map(snap.players.map(p => [p.guid, p]));
+    push(state.history.bots, snap.counts.bots);
+    push(state.history.avg, snap.update_ms.avg);
+    state.conn = { ok: true, ts: snap.ts, seen: now, text: "" };
+    emit("snapshot");
+  } catch (e) {
+    state.conn = { ok: false, ts: state.conn.ts, seen: state.conn.seen, text: e.message };
+  }
+  emit("conn");
+  if (state.conn.ok) {
+    if (!state.worldmap) await refreshWorldmap();
+    if (state.panel === "commands" && state.dockOpen) refreshCommands();
+  }
 }

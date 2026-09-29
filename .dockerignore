@@ -1,0 +1,15 @@
+*
+!standalone/
+standalone/*
+!standalone/package.json
+!standalone/package-lock.json
+!standalone/tsconfig*.json
+!standalone/eslint.config.mjs
+!standalone/test/
+!standalone/test/**
+!standalone/src/
+!standalone/src/**
+!web/
+!web/**
+!tests/
+!tests/*.mjs

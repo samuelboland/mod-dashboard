@@ -12,6 +12,7 @@ import { mountGroups } from "./components/groups.js";
 import { mountGroupsGrid } from "./components/groups-grid.js";
 import { mountCompanies } from "./components/companies.js";
 import { mountChronicle } from "./components/chronicle.js";
+import { mountRumours } from "./components/rumours.js";
 import { mountChronicleReader } from "./components/chronicle-reader.js";
 import { mountMarket } from "./components/market.js";
 import { mountCommands } from "./components/commands.js";
@@ -35,6 +36,7 @@ mountFeelings(panels.feelings);
 mountGroups(panels.groups);
 mountCompanies(panels.companies);
 mountChronicle(panels.chronicle);
+mountRumours(panels.rumours);
 mountMarket(panels.market);
 mountAccounting(panels.costs, document.body);
 mountCommands(panels.commands);
@@ -62,6 +64,6 @@ document.addEventListener("keydown", e => {
   }
 });
 
+startPolling();
 await loadStatic();
 setContinent(state.continent);
-startPolling();

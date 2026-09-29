@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.log
+node_modules/
+standalone/dist/
+.env

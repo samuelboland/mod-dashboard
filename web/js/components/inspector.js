@@ -31,7 +31,7 @@ function hero(p) {
       p.mounted && h("span.pill", "Mounted")),
     h("div.hero-loc", icon("pin", 14), p.instance ? p.map_name : `${p.zone_name || "Unknown"}, ${p.map_name}`),
     h("div.hero-actions",
-      p.bot && h("button.btn", { type: "button", class: p.paused ? "btn-go" : "btn-primary", disabled: state.busy, on: { click: () => sendCommand(p.paused ? "resume" : "pause", p) } },
+      p.bot && h("button.btn", { type: "button", class: p.paused ? "btn-go" : "btn-primary", disabled: state.busy || !state.conn.ok, on: { click: () => sendCommand(p.paused ? "resume" : "pause", p) } },
         icon(p.paused ? "play" : "pause", 14), state.busy ? "Working…" : p.paused ? "Resume" : "Pause"),
       onAnyContinent(p) && h("button.btn", { type: "button", on: { click: () => select(p.guid, true) } }, icon("locate", 14), "Show on map"),
       h("button.btn", { type: "button", title: "Everything they have done, in the order it happened",
@@ -236,12 +236,12 @@ export function mountInspector(aside) {
       if (state.inspectorTab === "memories") loadMemories(state.selected);
       const p = state.byGuid.get(state.selected);
       if (!p) render(inner, `gone|${state.selected}|${state.regard?.generated}`, () => goneView(state.selected));
-      else render(inner, characterSig(p), () => characterView(p));
+      else render(inner, `${state.conn.ok}|${characterSig(p)}`, () => characterView(p));
     } else {
       render(inner, `g|${gid}|${state.companies.generated}|${state.theme}`, () => companyView(gid));
     }
   }
 
-  on("selection snapshot busy lore regard ties botmemories memories companies theme", draw);
+  on("selection snapshot conn busy lore regard ties botmemories memories companies theme", draw);
 }
 

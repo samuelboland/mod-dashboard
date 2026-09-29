@@ -50,6 +50,11 @@ export function mountRoster(panel) {
   on("focus-search", () => { input.focus(); input.select(); });
 
   function draw() {
+    if (!state.snap) {
+      for (const n of chipCounts.values()) n.textContent = "–";
+      render(list, `unavailable|${state.conn.text}`, () => empty(state.conn.text === "Connecting…" ? "Waiting for the realm." : "Realm unavailable. No live roster has been received."));
+      return;
+    }
     const players = state.players;
     const q = state.query.trim().toLowerCase();
     const match = p => !q || p.name.toLowerCase().includes(q);
@@ -84,7 +89,7 @@ export function mountRoster(panel) {
           : "Nobody fits this filter right now.", "users"));
   }
 
-  on("snapshot selection continent", draw);
+  on("snapshot conn selection continent", draw);
   draw();
 }
 

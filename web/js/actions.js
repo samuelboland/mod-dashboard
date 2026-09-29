@@ -72,6 +72,10 @@ export function setTheme(theme) {
 }
 
 export async function sendCommand(cmd, p) {
+  if (!state.conn.ok || state.busy) {
+    toast({ tone: "info", title: "Command not sent", text: state.busy ? "A command is already pending." : "The realm is disconnected." });
+    return;
+  }
   const token = state.token.trim();
   if (!token) {
     setPanel("commands");
@@ -87,12 +91,13 @@ export async function sendCommand(cmd, p) {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Dashboard-Token": token },
       body: JSON.stringify({ guid: p.guid }),
+      signal: AbortSignal.timeout(10000),
     });
     const body = await res.json().catch(() => ({ ok: false, message: `HTTP ${res.status}` }));
     state.lastResult = { guid: p.guid, ok: !!body.ok, text: body.message || `HTTP ${res.status}` };
     if (res.status === 401) { setPanel("commands"); emit("need-token"); }
   } catch (e) {
-    state.lastResult = { guid: p.guid, ok: false, text: `Could not reach the server: ${e.message}` };
+    state.lastResult = { guid: p.guid, ok: false, text: `Delivery unconfirmed: ${e.message}. Check command history before trying again.` };
   } finally {
     state.busy = false;
     const r = state.lastResult;

@@ -83,10 +83,15 @@ export function mountTopbar(root) {
 
   on("mapcounts", ({ total }) => t.here.set(total.toLocaleString()));
 
-  on("conn", () => {
+  const drawConnection = () => {
     const c = state.conn;
     conn.classList.toggle("ok", c.ok);
     conn.classList.toggle("bad", !c.ok && c.text !== "Connecting…");
-    connText.textContent = c.ok ? `Live · ${clockS(c.ts)}` : c.text === "Connecting…" ? c.text : `Not updating: ${c.text}`;
-  });
+    const age = c.seen ? Math.max(0, Math.floor((Date.now() - c.seen) / 1000)) : null;
+    connText.textContent = c.ok ? `Live · ${clockS(c.ts)}` : c.text === "Connecting…" ? c.text
+      : age === null ? "Realm unavailable · no live data" : `Realm unavailable · last update ${age}s ago`;
+    conn.title = c.ok ? "Snapshot from the world server, every 2 seconds" : c.text;
+  };
+  on("conn", drawConnection);
+  setInterval(drawConnection, 1000);
 }

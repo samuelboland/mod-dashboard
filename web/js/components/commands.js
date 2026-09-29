@@ -24,14 +24,16 @@ export function mountCommands(panel) {
   input.addEventListener("change", () => localSet("token", input.value.trim()));
   on("need-token", () => { input.focus(); input.select(); });
 
-  on("commands", () => {
+  on("commands conn", () => {
     const c = state.commands;
-    render(status, `${c.enabled}`, () => h("div.status-card", { class: c.enabled ? "" : "off" },
-      h("span.seal", icon(c.enabled ? "check" : "alert", 18)),
+    const enabled = state.conn.ok && c?.enabled;
+    render(status, `${state.conn.ok}|${enabled}`, () => h("div.status-card", { class: enabled ? "" : "off" },
+      h("span.seal", icon(enabled ? "check" : "alert", 18)),
       h("div",
-        h("div.card-title", c.enabled ? "Commands are on" : "Commands are off"),
-        h("div.card-sub", c.enabled ? "Pause and resume from the inspector." : "The server has no Dashboard.CommandToken."))));
-    const recent = c.recent.slice(0, 20);
+        h("div.card-title", !state.conn.ok ? "Realm unavailable" : enabled ? "Commands are on" : "Commands are off"),
+        h("div.card-sub", !state.conn.ok ? "Commands require a live connection. Any results below are from the last refresh."
+          : enabled ? "Pause and resume from the inspector." : "The server has no Dashboard.CommandToken."))));
+    const recent = c?.recent.slice(0, 20) || [];
     log.count(recent.length);
     render(log.body, JSON.stringify(recent), () => recent.length ? recent.map(r => {
       const p = state.byGuid.get(r.guid);

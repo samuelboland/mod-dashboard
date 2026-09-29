@@ -8,18 +8,33 @@
 // #journey/<guid> in the address opens one on load, so a character's record can live in a tab of its
 // own. A journey exists for characters who are offline too: it is a record of the past, and the
 // dashboard's other views can only ever show who is in the world right now.
-import { state, on } from "../state.js";
+import { state, on, localGet } from "../state.js";
 import { h, icon, render } from "../lib/dom.js";
 import { full, clock, num, plural, signed, capital, CLASSES, CLASS_COLORS, RACES } from "../lib/format.js";
 import { scoreClass } from "../lib/world.js";
 import { loadJourney } from "../api.js";
 import { empty, kpis, avatar, factionBadge, who as whoLink } from "./common.js";
+import { toast } from "./toast.js";
+import { sayButton, voiceOpen, clipOf, hasVoice, onVoices, playAll, playingQueue, recordAll, exportSection, voicesOn, changeVoice, stop as stopVoices } from "./voice.js";
 
 const HASH = "#journey";
 const PAGE = 90;              // render-plan rows added each time the foot comes into view
 const CHAPTER_GAP = 1800;     // a gap longer than this starts a new bout
 const TALK_LINES = 12;        // a conversation shows this much before "read all of it"
 const BUCKETS = 132;          // bars across the ribbon
+
+// The story of a journey (plan 53). Writing one is slow, so it goes to the lore gate on its own port
+// and answers with a job to watch -- mod-dashboard caps a body at 1024 bytes and never answers a
+// preflight, which is why nothing that writes goes to :8787. The stories themselves are READ from
+// the static /data mount, so a journey can be read back with no token at all.
+const GATE = `${location.protocol}//${location.hostname}:8788`;
+const JOB_POLL = 1500;
+const ENDED_WORDS = {
+  disband: "the company broke up",
+  left: "they walked away from the company",
+  kicked: "they were put out of the company",
+  quiet: "the day went quiet",
+};
 
 // Horde races, for the faction badge: the journey file carries a race, not a team.
 const HORDE = new Set([2, 5, 6, 8, 10]);
@@ -91,12 +106,16 @@ export function mountJourneyFull(root) {
   const foot = h("div.jy-foot");
   const scroll = h("div.jy-scroll", list, foot);
 
+  const storiesBtn = h("button.btn.jy-stories-btn", { type: "button", title: "The journeys they have lived, written up as stories",
+    on: { click: () => toggleStories() } }, icon("book", 14), h("span", "Stories"));
+  const storiesBox = h("div.jy-stories", { hidden: true });
+
   const overlay = h("div.jy-overlay", { role: "dialog", "aria-modal": "true", "aria-label": "A character's journey", tabindex: "-1", hidden: true },
     h("div.jy-bar",
       h("div.jy-bar-title", icon("route", 17), "Journey"),
       whoWrap, filters, search,
-      h("div.jy-bar-end", newTab, close)),
-    head, ribbonWrap, scroll);
+      h("div.jy-bar-end", storiesBtn, newTab, close)),
+    head, storiesBox, ribbonWrap, scroll);
   root.append(overlay);
 
   const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) grow(); }, { root: scroll, rootMargin: "700px" });
@@ -224,14 +243,14 @@ export function mountJourneyFull(root) {
     const body = h("div.jy-talk-body");
     const fill = all => {
       const use = all ? e.lines : shown;
-      body.replaceChildren(
+      body.replaceChildren(...[
         !all && e.lines.length > use.length
           ? h("button.jy-talk-more", { type: "button", on: { click: () => fill(true) } },
               `Read all ${num(e.lines.length)} lines`)
           : null,
         ...use.map(([g, ts, text]) =>
           h("div.bubble", { class: g === guid ? "a" : "b", title: full(ts) },
-            h("b", `${nameOf(g)} · ${clock(ts)}`), text)));
+            h("b", `${nameOf(g)} · ${clock(ts)}`, sayButton({ guid: g }, text)), text))].filter(Boolean));
     };
     fill(false);
     const block = h("div.jy-talk",
@@ -247,7 +266,7 @@ export function mountJourneyFull(root) {
   function encounterNode(e) {
     const body = h("div.jy-talk-body",
       ...e.lines.map(([name, text]) =>
-        h("div.bubble", { class: name === doc()?.name ? "a" : "b" }, h("b", name), text)));
+        h("div.bubble", { class: name === doc()?.name ? "a" : "b" }, h("b", name, sayButton({ name }, text)), text)));
     const moments = (e.moments || []).length
       ? h("div.moments", e.moments.map(m => h("div.moment",
           h("span.delta", { class: scoreClass(m.feels * 10) }, signed(m.feels)),
@@ -296,18 +315,109 @@ export function mountJourneyFull(root) {
 
   function chapterNode(c) {
     const others = [...c.with].filter(g => g !== guid).slice(0, 5);
+    const voice = h("span.jy-chapter-voice");
+    const lines = voicesOn() ? spoken(c) : [];
+    if (lines.length) { const v = { el: voice, c, lines }; voiceHeads.add(v); drawVoiceHead(v); }
     return h("div.jy-chapter-head",
       icon("pin", 12),
       h("span.jy-chapter-where", c.place || "Somewhere"),
       others.length ? h("span.jy-chapter-with", "with ", ...others.flatMap((g, i) => [i ? ", " : "", personLink(g)])) : null,
+      voice,
       h("span.jy-chapter-when", span(c.to, c.from)));
   }
+
+  // ---- a section read aloud (plan 57) ----
+  //
+  // Every line spoken in a section, oldest first: party talk carries a guid per line, a conversation no
+  // one overheard only a name. Items arrive newest first; the lines inside a talk are already in order.
+  let voiceHeads = new Set();
+  let recording = null;       // the one section being recorded: the job recordAll reports
+  const COST_PER_CHAR = 15 / 1e6;   // Fish S2.1 Pro through OpenRouter, $ per character
+  function spoken(c) {
+    const out = [];
+    for (const e of [...c.items].reverse()) {
+      if (e.k === "talk") for (const [g, ts, text] of e.lines) out.push({ who: { guid: g }, text, ts });
+      else if (e.k === "encounter") for (const [name, text] of e.lines) out.push({ who: { name }, text, ts: e.ts });
+    }
+    return out;
+  }
+  function drawVoiceHead(v) {
+    const done = v.lines.filter(l => clipOf(l.who, l.text)).length;
+    const total = v.lines.length;
+    const playing = playingQueue()?.items === v.lines;
+    const unvoiced = new Set(v.lines.filter(l => !hasVoice(l.who)).map(l => l.who.name || nameOf(l.who.guid)));
+    const count = h("span.jy-voice-count", { class: done === total ? "all" : "",
+      title: done === total ? "Every line in this section is recorded"
+        : `${num(total - done)} of ${num(total)} lines still to record`
+          + (unvoiced.size ? ` · no voice yet: ${[...unvoiced].slice(0, 6).join(", ")}` : "") },
+      icon("volume", 11), `${num(done)}/${num(total)}`);
+    const rec = recording && recording.lines === v.lines ? recording : null;
+    const left = v.lines.filter(l => !clipOf(l.who, l.text));
+    const cost = left.reduce((a, l) => a + l.text.length, 0) * COST_PER_CHAR;
+    const recordBtn = rec
+      ? h("span.jy-voice-rec",
+          icon("activity", 11),
+          rec.stage === "cast" ? `Casting${rec.casting ? ` ${rec.casting}` : ""}…`
+            : rec.stage === "record" ? `Recording ${num(rec.done + rec.failed)}/${num(rec.total)}…` : "Finishing…",
+          h("button.chip", { type: "button", title: "Stop recording; what is recorded stays",
+            on: { click: e => { e.stopPropagation(); rec.cancelled = true; drawVoiceHead(v); } } },
+            rec.cancelled ? "Stopping…" : "Stop"))
+      : done < total && h("button.chip.jy-voice-record", { type: "button", disabled: !!recording,
+          title: `Record the ${num(left.length)} lines left, about $${cost < 0.01 ? cost.toFixed(3) : cost.toFixed(2)}.`
+            + (unvoiced.size ? ` First you cast a voice for: ${[...unvoiced].slice(0, 6).join(", ")}.` : ""),
+          on: { click: async e => {
+            e.stopPropagation();
+            stopVoices();
+            recording = { lines: v.lines, stage: "cast" };
+            refreshVoiceHeads();
+            await recordAll(v.lines, job => { recording = job; refreshVoiceHeads(); });
+            recording = null;
+            refreshVoiceHeads();
+          } } },
+          icon("volume", 11), "Record the rest");
+    v.el.replaceChildren(...[count, recordBtn, !rec && done === total
+      ? h("button.chip.jy-voice-play", { type: "button", class: playing ? "on" : "",
+          title: playing ? "Stop" : "Play every line in this section, in order",
+          on: { click: e => {
+            e.stopPropagation();
+            if (playingQueue()?.items === v.lines) return stopVoices();
+            playAll(v.lines, () => refreshVoiceHeads());
+            refreshVoiceHeads();
+          } } },
+          icon(playing ? "pause" : "play", 11), playing ? "Stop" : "Play all")
+      : null,
+      !rec && done === total ? h("button.chip.jy-voice-play", { type: "button", disabled: v.packing,
+          title: "Download the section: every line as its own file, the whole thing as one track (as it "
+            + "happened, and back to back), subtitles for both, and a manifest",
+          on: { click: async e => {
+            e.stopPropagation();
+            v.packing = true; drawVoiceHead(v);
+            const title = `${doc()?.name || ""} ${v.c.place || ""}`.trim();
+            await exportSection(v.lines, title);
+            v.packing = false; drawVoiceHead(v);
+          } } },
+          icon(v.packing ? "activity" : "download", 11), v.packing ? "Packing…" : "Download")
+      : null].filter(Boolean));
+  }
+  function refreshVoiceHeads() {
+    for (const v of voiceHeads) {
+      if (!v.el.isConnected) { voiceHeads.delete(v); continue; }
+      drawVoiceHead(v);
+    }
+  }
+  let wasOn = voicesOn();
+  onVoices(() => {
+    if (voicesOn() !== wasOn) { wasOn = voicesOn(); if (!overlay.hidden) rebuild(); return; }
+    refreshVoiceHeads();
+    paintVoiceBtn();
+  });
 
   // ---- building and paging ----
   function rebuild() {
     query = search.value.trim().toLowerCase();
     const d = doc();
     drawn = 0;
+    voiceHeads = new Set();
     list.replaceChildren();
     if (!d) {
       const cur = held();
@@ -371,6 +481,20 @@ export function mountJourneyFull(root) {
   }
 
   // ---- the header ----
+  // Their voice: "Change voice" once they have one (hear samples, keep a new one, re-record their lines),
+  // "Give a voice" before. Kept outside render() so a new voice relabels it without rebuilding the header.
+  const voiceBtn = h("button.chip.jy-voice-btn", { type: "button",
+    on: { click: () => { const d = doc(); if (d) changeVoice({ guid: d.guid, name: d.name }); } } });
+  function paintVoiceBtn() {
+    const d = doc();
+    voiceBtn.hidden = !d || !voicesOn();
+    if (voiceBtn.hidden) return;
+    const has = hasVoice({ guid: d.guid });
+    voiceBtn.title = has ? `Hear samples of a new voice for ${d.name}, keep one, and re-record their lines`
+      : `Give ${d.name} a voice`;
+    voiceBtn.replaceChildren(icon("volume", 12), has ? "Change voice" : "Give a voice");
+  }
+
   function drawHead() {
     const d = doc();
     // The button names whoever is being read. It is set here and not in go(), because when go() runs
@@ -389,7 +513,7 @@ export function mountJourneyFull(root) {
     render(head, `${d.guid}|${d.kept}|${state.journeys?.generated}`, () => [
       h("div.jy-id", { style: { "--cc": CLASS_COLORS[d.cls] || "var(--gold)" } },
         avatar({ class: d.cls }, "lg"),
-        h("div", h("div.jy-name", d.name),
+        h("div", h("div.jy-name-row", h("div.jy-name", d.name), voiceBtn),
           h("div.jy-sub", `Level ${d.level} ${RACES[d.race] || ""} ${CLASSES[d.cls] || ""}`.replace(/\s+/g, " ").trim()))),
       h("div.jy-tags",
         factionBadge(HORDE.has(d.race) ? "Horde" : "Alliance"),
@@ -404,6 +528,7 @@ export function mountJourneyFull(root) {
         ["memories", num(c.memory || 0)],
         ["companions", num(companions.size)],
       ]),
+      paintVoiceBtn(),
       total > d.kept && h("div.jy-panel-note",
         `Showing the most recent ${num(d.kept)} of ${num(total)}: each kind is kept to its latest few hundred.`),
     ]);
@@ -509,6 +634,178 @@ export function mountJourneyFull(root) {
     if (!picker.hidden && !whoWrap.contains(e.target)) picker.hidden = true;
   });
 
+  // ---- the stories (plan 53) ----
+  //
+  // Two sources, deliberately. The legs -- every stretch this character actually lived -- are cut
+  // from the ledger by the gate, because working out where a journey ended needs the whole record
+  // and a rule ("a company breaking up, or three quarters of an hour of nothing"). The stories
+  // already written are a plain file on the /data mount, so they can be read with no token.
+  let storiesOpen = false, legs = null, legsFor = null, told = new Map(), opened = new Set();
+  let job = null, poll = null, writing = null, legsError = "";
+
+  const token = () => (localGet("loreToken") || "").trim();
+
+  async function loadTold(g) {
+    told = new Map();
+    try {
+      const res = await fetch(`data/journey-stories/${g}.json`, { cache: "no-store" });
+      if (!res.ok) return;                       // no stories yet is the ordinary case, not an error
+      const doc = await res.json();
+      // floor, never round: a leg's start is a datetime(3) float straight off the ledger, while the
+      // story keeps it in a DATETIME, which TRUNCATES. Rounding 1790258480.55 up to ...481 matches
+      // no stored story, and the journey shows as unwritten while its story sits in the file.
+      for (const s of doc.stories || []) told.set(Math.floor(s.start), s);
+    } catch { /* the file is absent until the first story is written */ }
+  }
+
+  async function loadLegs(g) {
+    legsError = "";
+    if (!token()) { legs = []; legsFor = g; legsError = "token"; return; }
+    try {
+      const res = await fetch(`${GATE}/journey-legs?guid=${g}`, {
+        headers: { "X-Lore-Token": token() }, cache: "no-store" });
+      const doc = await res.json().catch(() => ({}));
+      if (!doc.ok) { legs = []; legsError = doc.message || `HTTP ${res.status}`; }
+      else { legs = doc.legs || []; }
+    } catch (e) {
+      legs = [];
+      legsError = `The gate could not be reached: ${e.message}`;
+    }
+    legsFor = g;
+  }
+
+  async function refresh(g) {
+    await Promise.all([loadTold(g), loadLegs(g)]);
+    drawStories();
+  }
+
+  function toggleStories() {
+    storiesOpen = !storiesOpen;
+    storiesBox.hidden = !storiesOpen;
+    storiesBtn.classList.toggle("on", storiesOpen);
+    if (storiesOpen && guid != null && legsFor !== guid) { drawStories(); refresh(guid); }
+    else if (storiesOpen) drawStories();
+  }
+
+  function writeStory(leg) {
+    if (!token()) return toast({ ok: false, title: "No gate token",
+      text: "Open the Lore panel and enter the gate token first." });
+    writing = Math.floor(leg.start);
+    job = { state: "running", steps: [], message: "" };
+    drawStories();
+    fetch(`${GATE}/journey-write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Lore-Token": token() },
+      body: JSON.stringify({ guid, start: leg.start }),
+    }).then(r => r.json()).then(r => {
+      if (!r.ok) { job = { state: "failed", steps: [], message: r.message || "It was refused." }; writing = null; drawStories(); return; }
+      watchJob(r.job);
+    }).catch(e => {
+      job = { state: "failed", steps: [], message: `Could not reach the gate: ${e.message}` };
+      writing = null;
+      drawStories();
+    });
+  }
+
+  function watchJob(id) {
+    clearTimeout(poll);
+    const tick = async () => {
+      try {
+        const res = await fetch(`${GATE}/job?id=${encodeURIComponent(id)}`, {
+          headers: { "X-Lore-Token": token() }, cache: "no-store" });
+        const r = await res.json();
+        if (r.ok) job = r.job;
+        drawStories();
+        if (job && job.state === "running") { poll = setTimeout(tick, JOB_POLL); return; }
+        // Done or failed: the story file has been rewritten, so read it back.
+        const done = job && job.state === "done";
+        if (done && writing) opened.add(writing);
+        writing = null;
+        if (done) { toast({ ok: true, title: "The story is written", text: job.message || "" }); await refresh(guid); }
+        else { toast({ ok: false, title: "It could not be written", text: job?.message || "" }); drawStories(); }
+      } catch {
+        poll = setTimeout(tick, 3000);
+      }
+    };
+    tick();
+  }
+
+  function storyNode(s) {
+    return h("div.jy-story",
+      h("div.jy-story-head", h("b", s.title),
+        h("span.muted", `${plural(s.words, "word")} · ${plural(s.chapters?.length || 1, "part")}`
+          + (s.version > 1 ? ` · written ${num(s.version)} times` : ""))),
+      ...(s.chapters || []).map(c => h("div.jy-story-part",
+        h("div.jy-story-where", icon("pin", 11), c.place || "Somewhere",
+          c.company?.length ? h("span.muted", ` · with ${c.company.join(", ")}`) : null),
+        ...String(c.prose || "").split(/\n\n+/).map(p => h("p", p)))),
+      s.flag ? h("div.jy-story-flag", icon("alert", 12),
+        h("span", `A reader of this age questioned something: ${s.flag}`)) : null);
+  }
+
+  function legNode(leg) {
+    const key = Math.floor(leg.start);
+    const s = told.get(key);
+    const busy = writing === key;
+    const isOpen = opened.has(key);
+    const mins = Math.max(1, Math.round((leg.end - leg.start) / 60));
+    return h("div.jy-leg", { class: s ? "told" : "" },
+      h("div.jy-leg-main",
+        h("div.jy-leg-line",
+          h("b", leg.place || "Somewhere"),
+          h("span.muted", ` · ${dayShort(leg.start)} ${clock(leg.start)} · ${plural(mins, "minute")}`)),
+        h("div.jy-leg-sub",
+          h("span.muted", `${plural(leg.deeds, "deed")}, until ${ENDED_WORDS[leg.ended] || leg.ended}`),
+          leg.companions?.length
+            ? h("span.muted", ` · with ${leg.companions.slice(0, 4).join(", ")}`
+                + (leg.companions.length > 4 ? ` and ${num(leg.companions.length - 4)} more` : ""))
+            : h("span.muted", " · alone"))),
+      h("div.jy-leg-end",
+        s && h("button.chip", { type: "button", class: isOpen ? "on" : "",
+          on: { click: () => { isOpen ? opened.delete(key) : opened.add(key); drawStories(); } } },
+          isOpen ? "Hide" : "Read"),
+        h("button.btn", { type: "button", class: s ? "" : "btn-primary", disabled: !!writing,
+          title: s ? "Write this journey again, from the same deeds" : "Write the story of this journey",
+          on: { click: () => writeStory(leg) } },
+          icon(busy ? "activity" : "book", 13),
+          busy ? "Writing…" : s ? "Again" : "Write the story")),
+      busy && job ? h("div.jy-leg-job",
+        ...(job.steps || []).slice(-4).map(t => h("div.jy-step", t)),
+        h("div.jy-step.working", icon("activity", 12), "Writing. This takes a minute.")) : null,
+      s && isOpen ? storyNode(s) : null);
+  }
+
+  function drawStories() {
+    if (!storiesOpen) return;
+    const d = doc();
+    if (guid == null) { storiesBox.replaceChildren(empty("Choose a character first.", "book")); return; }
+    if (legs === null || legsFor !== guid) {
+      storiesBox.replaceChildren(empty("Looking for the journeys they have lived…", "book"));
+      return;
+    }
+    if (legsError === "token") {
+      storiesBox.replaceChildren(h("div.jy-panel-note",
+        "Stories are written by the lore gate, which wants its token. Open the Lore panel, enter it "
+        + "there, and come back."));
+      return;
+    }
+    if (legsError) {
+      storiesBox.replaceChildren(h("div.jy-panel-note.bad", legsError));
+      return;
+    }
+    if (!legs.length) {
+      storiesBox.replaceChildren(empty(
+        `${d?.name || "They"} has lived no journey long enough to be worth telling yet.`, "book"));
+      return;
+    }
+    storiesBox.replaceChildren(
+      h("div.jy-stories-head",
+        h("span", plural(legs.length, "journey", "journeys"), " · ",
+          h("span.muted", `${num(told.size)} written up`)),
+        h("span.muted", "A journey runs until the company breaks up, or three quarters of an hour of nothing.")),
+      h("div.jy-legs", ...legs.map(legNode)));
+  }
+
   // ---- showing, hiding, choosing ----
   function go(next) {
     if (next == null) return;
@@ -517,7 +814,10 @@ export function mountJourneyFull(root) {
     kinds = new Set(KIND_IDS);
     search.value = "";
     query = "";
+    legs = null; legsFor = null; told = new Map(); opened = new Set();
+    clearTimeout(poll); job = null; writing = null;
     loadJourney(guid);
+    if (storiesOpen) { drawStories(); refresh(guid); }
     if (!overlay.hidden && location.hash !== `${HASH}/${guid}`) history.replaceState(null, "", `${HASH}/${guid}`);
     rebuild();
   }
@@ -541,6 +841,7 @@ export function mountJourneyFull(root) {
 
   function hide() {
     if (overlay.hidden) return;
+    stopVoices();
     overlay.hidden = true;
     picker.hidden = true;
     io.unobserve(foot);
@@ -550,7 +851,7 @@ export function mountJourneyFull(root) {
   }
 
   window.addEventListener("keydown", e => {
-    if (overlay.hidden) return;
+    if (overlay.hidden || voiceOpen()) return;   // the voice caster sits above the journey and has its own Escape
     e.stopPropagation();
     if (e.key === "Escape") {
       e.preventDefault();
