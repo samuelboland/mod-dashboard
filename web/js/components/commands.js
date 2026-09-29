@@ -37,7 +37,8 @@ export function mountCommands(panel) {
       const p = state.byGuid.get(r.guid);
       return h("div.log-item", { class: r.ok ? "ok" : "bad" },
         icon(r.ok ? "check" : "alert", 14),
-        h("div", r.cmd !== "system" && h("b", `${r.cmd} ${p ? p.name : "#" + r.guid}: `), h("span.log-text", r.message)),
+        h("div", r.cmd === "setting" ? h("b", `setting ${r.key || ""}: `)
+                 : r.cmd !== "system" && h("b", `${r.cmd} ${p ? p.name : "#" + r.guid}: `), h("span.log-text", r.message)),
         h("span.ts", clockS(r.ts)));
     }) : empty("No commands sent since the server started.", "terminal"));
   });
