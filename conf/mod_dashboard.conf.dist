@@ -44,6 +44,32 @@ Dashboard.WebRoot =
 #     Default:     "" (commands off)
 Dashboard.CommandToken = ""
 
+# Dashboard.Settings.Keys
+#     Description: Comma-separated config keys the page's Settings panel shows,
+#                  with their current values (GET /settings). Only these keys
+#                  can be changed from the page. Empty turns the panel off.
+#                  Example: OllamaChat.Conversation.Enable,OllamaChat.Delivery.Split
+#     Default:     "" (off)
+Dashboard.Settings.Keys = ""
+
+# Dashboard.Settings.File
+#     Description: The config file those keys are written to when changed from
+#                  the page (POST /cmd/setting, which needs the command token).
+#                  A relative path is found beside worldserver.conf, e.g.
+#                  modules/mod_ollama_chat.conf. One backup is kept beside it as
+#                  <file>.dashboard.bak. Empty leaves the panel read-only. If your
+#                  config files are generated from another source, record the
+#                  change there too, or the next regeneration undoes it.
+#     Default:     "" (read-only)
+Dashboard.Settings.File = ""
+
+# Dashboard.Settings.ReloadCommand
+#     Description: Console command queued after a change, so it takes effect
+#                  without a restart, e.g. "ollama reload". Empty: the change
+#                  waits for the next reload or restart.
+#     Default:     ""
+Dashboard.Settings.ReloadCommand = ""
+
 # Dashboard.PauseTeleportHoldSec
 #     Description: On pause, the random-bot teleport timer is pushed this far out
 #                  so the bot is not moved away. Resume reschedules it normally.

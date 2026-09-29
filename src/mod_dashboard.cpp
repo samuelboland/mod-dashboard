@@ -17,6 +17,7 @@
 #include "BuiltInConfig.h"
 #include "ScriptMgr.h"
 #include "UpdateTime.h"
+#include "World.h"
 #include "WorldSession.h"
 
 #include "PlayerbotAI.h"
@@ -33,7 +34,9 @@
 #include <chrono>
 #include <ctime>
 #include <deque>
+#include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -124,6 +127,8 @@ namespace
         uint64 id = 0;
         std::string cmd;
         uint32 guid = 0;
+        std::string key;     // "setting" only
+        std::string value;   // "setting" only
         std::string from;
         std::promise<json> result;
     };
@@ -133,6 +138,20 @@ namespace
     std::atomic<size_t> s_pending{ 0 };
     std::atomic<uint64> s_nextId{ 1 };
     constexpr size_t QUEUE_LIMIT = 32;
+
+    // ---- Settings (Dashboard.Settings.*) ---------------------------------
+    //
+    // A short list of config keys the page may show and, with the command
+    // token, change. Values are read on the world thread only -- ConfigMgr's
+    // getters take no lock, and a reload rewrites the map under them -- and
+    // published as a finished string like /bots. A change rewrites the key in
+    // Dashboard.Settings.File and queues Dashboard.Settings.ReloadCommand on the
+    // console queue, the way a console or SOAP command runs.
+    std::vector<std::string> s_settingKeys;   // guarded by s_dataLock
+    std::string s_settingsFile;                // world thread
+    std::string s_settingsReload;              // world thread
+    std::shared_ptr<std::string const> s_settings;
+    constexpr size_t SETTING_VALUE_LIMIT = 2000;
 
     // World thread only.
     struct PauseState
@@ -264,6 +283,104 @@ namespace
         return Result(true, "Resumed " + player->GetName() + "; " + std::to_string(restored) + " strategies restored", 200);
     }
 
+    // World thread. What the page shows for Dashboard.Settings.Keys.
+    std::string BuildSettings()
+    {
+        std::vector<std::string> keys;
+        bool writable;
+        {
+            std::lock_guard<std::mutex> lock(s_dataLock);
+            keys = s_settingKeys;
+            writable = !s_token.empty() && !s_settingsFile.empty();
+        }
+
+        json list = json::array();
+        for (std::string const& key : keys)
+            list.push_back({ { "key", key }, { "value", sConfigMgr->GetOption<std::string>(key, "", false) } });
+
+        std::string file = s_settingsFile.empty() ? "" : std::filesystem::path(s_settingsFile).filename().string();
+        return Dump({ { "enabled", !keys.empty() }, { "writable", writable }, { "file", file },
+                      { "reload", s_settingsReload }, { "settings", list } });
+    }
+
+    // A config value as the core's parser will read it back: bare when it is a
+    // single plain token, quoted otherwise (the parser strips the quotes).
+    std::string ConfValue(std::string const& value)
+    {
+        bool plain = !value.empty();
+        for (char c : value)
+            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '-' && c != '_' && c != ':' && c != '/')
+                plain = false;
+        return plain ? value : "\"" + value + "\"";
+    }
+
+    void PrintCliLine(void*, std::string_view text)
+    {
+        if (!text.empty())
+            LOG_INFO("module", "[Dashboard] reload: {}", text);
+    }
+
+    void CliFinished(void*, bool success)
+    {
+        if (!success)
+            LOG_WARN("module", "[Dashboard] the settings reload command did not succeed");
+    }
+
+    // World thread. Rewrites one key in Dashboard.Settings.File -- the first
+    // uncommented line that sets it, or a new line at the end -- keeping one
+    // backup beside it, then queues the reload command.
+    json DoSetting(std::string const& key, std::string const& value)
+    {
+        if (s_settingsFile.empty())
+            return Result(false, "Dashboard.Settings.File is not set, so settings are read-only", 409);
+
+        std::ifstream in(s_settingsFile);
+        if (!in)
+            return Result(false, "Cannot read " + s_settingsFile, 500);
+        std::vector<std::string> lines;
+        for (std::string line; std::getline(in, line); )
+            lines.push_back(line);
+        in.close();
+
+        std::string const written = key + " = " + ConfValue(value);
+        bool replaced = false;
+        for (std::string& line : lines)
+        {
+            size_t start = line.find_first_not_of(" \t");
+            if (start == std::string::npos || line[start] == '#' || line.compare(start, key.size(), key) != 0)
+                continue;
+            size_t after = line.find_first_not_of(" \t", start + key.size());
+            if (after == std::string::npos || line[after] != '=')
+                continue;
+            line = written;
+            replaced = true;
+            break;
+        }
+        if (!replaced)
+            lines.push_back(written);
+
+        std::error_code ec;
+        std::filesystem::copy_file(s_settingsFile, s_settingsFile + ".dashboard.bak",
+            std::filesystem::copy_options::overwrite_existing, ec);
+        std::string const temp = s_settingsFile + ".dashboard.tmp";
+        {
+            std::ofstream out(temp, std::ios::trunc);
+            for (std::string const& line : lines)
+                out << line << '\n';
+            if (!out)
+                return Result(false, "Cannot write " + temp, 500);
+        }
+        std::filesystem::rename(temp, s_settingsFile, ec);
+        if (ec)
+            return Result(false, "Cannot replace " + s_settingsFile + ": " + ec.message(), 500);
+
+        if (s_settingsReload.empty())
+            return Result(true, "Saved " + written + "; it takes effect at the next reload or restart", 200);
+
+        sWorld->QueueCliCommand(new CliCommandHolder(nullptr, s_settingsReload.c_str(), &PrintCliLine, &CliFinished));
+        return Result(true, "Saved " + written + "; running '" + s_settingsReload + "'", 200);
+    }
+
     void Remember(json entry)
     {
         std::lock_guard<std::mutex> lock(s_dataLock);
@@ -353,6 +470,8 @@ namespace
                     result = DoPause(command->guid);
                 else if (command->cmd == "resume")
                     result = DoResume(command->guid);
+                else if (command->cmd == "setting")
+                    result = DoSetting(command->key, command->value);
                 else
                     result = Result(false, "Unknown command", 400);
             }
@@ -362,13 +481,16 @@ namespace
             }
 
             result["id"] = command->id;
-            LOG_INFO("module", "[Dashboard] command #{} {} guid={} from {} -> {}: {}", command->id, command->cmd,
-                command->guid, command->from, result["ok"].get<bool>() ? "ok" : "refused",
-                result["message"].get<std::string>());
+            LOG_INFO("module", "[Dashboard] command #{} {} {} from {} -> {}: {}", command->id, command->cmd,
+                command->cmd == "setting" ? command->key : "guid=" + std::to_string(command->guid),
+                command->from, result["ok"].get<bool>() ? "ok" : "refused", result["message"].get<std::string>());
 
-            Remember({ { "id", command->id }, { "ts", static_cast<int64>(std::time(nullptr)) },
-                       { "cmd", command->cmd }, { "guid", command->guid }, { "from", command->from },
-                       { "ok", result["ok"] }, { "message", result["message"] } });
+            json entry = { { "id", command->id }, { "ts", static_cast<int64>(std::time(nullptr)) },
+                           { "cmd", command->cmd }, { "guid", command->guid }, { "from", command->from },
+                           { "ok", result["ok"] }, { "message", result["message"] } };
+            if (command->cmd == "setting")
+                entry["key"] = command->key;
+            Remember(std::move(entry));
             command->result.set_value(std::move(result));
         }
     }
@@ -568,6 +690,65 @@ namespace
         SendJson(res, status, result);
     }
 
+    // HTTP thread. Same token rule as the bot commands; the key must be one the
+    // page was given, and the value one line with no double quote (the core's
+    // parser strips every '"', so one could never be read back as written).
+    void HandleSetting(httplib::Request const& req, httplib::Response& res)
+    {
+        std::vector<std::string> keys;
+        bool configured;
+        {
+            std::lock_guard<std::mutex> lock(s_dataLock);
+            configured = !s_token.empty();
+            keys = s_settingKeys;
+        }
+        if (!configured)
+            return SendJson(res, 403, Result(false, "Commands are off: Dashboard.CommandToken is empty", 403));
+        if (!TokenMatches(req.get_header_value("X-Dashboard-Token")))
+        {
+            LOG_WARN("module", "[Dashboard] rejected setting from {}: bad or missing token", req.remote_addr);
+            return SendJson(res, 401, Result(false, "Missing or wrong token", 401));
+        }
+
+        json body = json::parse(req.body, nullptr, false);
+        if (body.is_discarded() || !body.is_object() || !body.contains("key") || !body["key"].is_string() ||
+            !body.contains("value") || !(body["value"].is_string() || body["value"].is_number() || body["value"].is_boolean()))
+            return SendJson(res, 400, Result(false, "Body must be JSON like {\"key\": \"Some.Key\", \"value\": \"1\"}", 400));
+
+        std::string key = body["key"].get<std::string>();
+        if (std::find(keys.begin(), keys.end(), key) == keys.end())
+            return SendJson(res, 403, Result(false, key + " is not in Dashboard.Settings.Keys", 403));
+
+        std::string value = body["value"].is_string() ? body["value"].get<std::string>()
+                          : body["value"].is_boolean() ? (body["value"].get<bool>() ? "1" : "0")
+                          : body["value"].dump();
+        if (value.size() > SETTING_VALUE_LIMIT || value.find_first_of("\"\r\n") != std::string::npos)
+            return SendJson(res, 400, Result(false, "The value must be one line, without double quotes", 400));
+
+        auto command = std::make_shared<Command>();
+        command->id = s_nextId++;
+        command->cmd = "setting";
+        command->key = std::move(key);
+        command->value = std::move(value);
+        command->from = req.remote_addr;
+        std::future<json> future = command->result.get_future();
+
+        {
+            std::lock_guard<std::mutex> lock(s_cmdLock);
+            if (s_queue.size() >= QUEUE_LIMIT)
+                return SendJson(res, 429, Result(false, "Command queue is full; try again", 429));
+            s_queue.push_back(command);
+            s_pending = s_queue.size();
+        }
+
+        if (future.wait_for(std::chrono::seconds(4)) != std::future_status::ready)
+            return SendJson(res, 504, { { "ok", false }, { "id", command->id },
+                { "message", "Queued, but the world thread did not answer within 4 s; check /commands" } });
+
+        json result = future.get();
+        SendJson(res, result.value("status", 200), result);
+    }
+
     void StartListeners()
     {
         std::string bind = sConfigMgr->GetOption<std::string>("Dashboard.Bind", "127.0.0.1");
@@ -595,7 +776,7 @@ namespace
             auto server = std::make_unique<httplib::Server>();
             server->set_read_timeout(5, 0);
             server->set_write_timeout(5, 0);
-            server->set_payload_max_length(1024);
+            server->set_payload_max_length(4096);   // a setting's value can be a prompt line
 
             server->Get("/bots", [](httplib::Request const&, httplib::Response& res) { ServeString(res, Load(s_bots)); });
             server->Get("/worldmap", [](httplib::Request const&, httplib::Response& res) { ServeString(res, Load(s_worldmap)); });
@@ -617,6 +798,8 @@ namespace
             });
             server->Post("/cmd/pause", [](httplib::Request const& req, httplib::Response& res) { HandleCommand("pause", req, res); });
             server->Post("/cmd/resume", [](httplib::Request const& req, httplib::Response& res) { HandleCommand("resume", req, res); });
+            server->Get("/settings", [](httplib::Request const&, httplib::Response& res) { ServeString(res, Load(s_settings)); });
+            server->Post("/cmd/setting", [](httplib::Request const& req, httplib::Response& res) { HandleSetting(req, res); });
 
             // Blizzard-derived map images live outside the module source so they
             // can never be committed with it.
@@ -672,8 +855,26 @@ public:
             LOG_ERROR("module", "[Dashboard] CommandToken is shorter than 16 characters; commands stay off");
             token.clear();
         }
+
+        std::vector<std::string> keys;
+        std::stringstream ss(sConfigMgr->GetOption<std::string>("Dashboard.Settings.Keys", ""));
+        for (std::string key; std::getline(ss, key, ','); )
+        {
+            key.erase(0, key.find_first_not_of(" \t"));
+            key.erase(key.find_last_not_of(" \t") + 1);
+            if (!key.empty() && std::find(keys.begin(), keys.end(), key) == keys.end())
+                keys.push_back(key);
+        }
+        // A relative file is found beside worldserver.conf, the way module confs are.
+        std::string file = sConfigMgr->GetOption<std::string>("Dashboard.Settings.File", "");
+        if (!file.empty() && std::filesystem::path(file).is_relative())
+            file = sConfigMgr->GetConfigPath() + file;
+        s_settingsFile = file;
+        s_settingsReload = sConfigMgr->GetOption<std::string>("Dashboard.Settings.ReloadCommand", "");
+
         std::lock_guard<std::mutex> lock(s_dataLock);
         s_token = std::move(token);
+        s_settingKeys = std::move(keys);
     }
 
     void OnStartup() override
@@ -708,6 +909,9 @@ public:
         {
             MaintainPauses();
             Store(s_bots, BuildSnapshot());
+            // Rebuilt every interval: a reload run from the console or another
+            // module changes these values without telling this one.
+            Store(s_settings, BuildSettings());
         }
         catch (std::exception const& e)
         {
