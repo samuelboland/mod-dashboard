@@ -61,10 +61,18 @@ export class Worldserver {
   }
 
   async command(command: Command, guid: number, token: string) {
+    return this.post(`/cmd/${command}`, { guid }, token);
+  }
+
+  async setting(key: string, value: string | number | boolean, token: string) {
+    return this.post("/cmd/setting", { key, value }, token);
+  }
+
+  private async post(path: string, payload: unknown, token: string) {
     // Exactly one attempt. A timeout may mean the command ran without a reply.
-    const response = await this.request(`/cmd/${command}`, {
+    const response = await this.request(path, {
       method: "POST", headers: { "Content-Type": "application/json", "X-Dashboard-Token": token },
-      body: JSON.stringify({ guid }),
+      body: JSON.stringify(payload),
     });
     const parsed = commandResult.safeParse(response.body);
     if (!parsed.success || response.status < 200 || response.status >= 600 || (response.status >= 300 && response.status < 400)) {

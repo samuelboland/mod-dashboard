@@ -1,13 +1,14 @@
 import Fastify from "fastify";
 import { z } from "zod";
 import type { Config } from "./config.js";
-import { commandBody } from "./contracts.js";
+import { commandBody, settingBody } from "./contracts.js";
 import { ControlApi, tokenMatches } from "./control.js";
 import { readFile } from "./files.js";
 import { UpstreamError, Worldserver } from "./worldserver.js";
 
 export function createServer(config: Config) {
-  const app = Fastify({ bodyLimit: 1024, requestTimeout: 10000, logger: false });
+  // A setting's value can be a prompt line, so bodies may reach a few kilobytes.
+  const app = Fastify({ bodyLimit: 4096, requestTimeout: 10000, logger: false });
   const world = new Worldserver(config);
   const control = config.control ? new ControlApi(config.control) : null;
   app.setErrorHandler((error, _request, reply) => {
@@ -46,7 +47,7 @@ export function createServer(config: Config) {
     try { return await control.action(body.data.action); }
     catch { return reply.code(503).send({ error: "Management service did not accept the operation; check its job status" }); }
   });
-  for (const path of ["/bots", "/worldmap", "/commands", "/health"] as const) {
+  for (const path of ["/bots", "/worldmap", "/commands", "/health", "/settings"] as const) {
     app.get(path, async (_request, reply) => {
       try { return await world.read(path); }
       catch (error) {
@@ -76,6 +77,25 @@ export function createServer(config: Config) {
       }
     });
   }
+  app.post("/cmd/setting", async (request, reply) => {
+    const origin = request.headers.origin;
+    if (origin && origin !== `${request.protocol}://${request.host}`) {
+      return reply.code(403).send({ ok: false, message: "Cross-origin commands are not allowed" });
+    }
+    const token = request.headers["x-dashboard-token"];
+    if (typeof token !== "string" || !token.trim() || token.length > 1024) {
+      return reply.code(401).send({ ok: false, message: "Missing command token" });
+    }
+    const body = settingBody.safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ ok: false, message: "Expected a setting key and value" });
+    try {
+      const result = await world.setting(body.data.key, body.data.value, token);
+      return await reply.code(result.status).send(result.body);
+    } catch (error) {
+      if (!(error instanceof UpstreamError)) throw error;
+      return reply.code(error.status).send({ ok: false, message: `${error.message}. The change is unconfirmed; reload the Settings panel before trying again.` });
+    }
+  });
   app.get<{ Params: { "*": string } }>("/*", async (request, reply) => {
     const file = await readFile(request.params["*"], config);
     if (!file) return reply.code(404).send({ error: "Not found" });
