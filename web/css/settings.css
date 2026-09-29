@@ -8,6 +8,11 @@
 .setting-key { font-size: 10.5px; color: var(--ink-3); overflow-wrap: anywhere; }
 .setting-edit { display: flex; gap: 8px; }
 .setting-edit .input { flex: 1 1 auto; min-width: 0; }
+.setting-resolved { font-size: 12px; color: var(--gold); }
+.settings-models { margin-top: 10px; }
+.model-edit { flex-wrap: wrap; }
+.model-edit select.input { flex: 1 1 100%; }
+.model-edit select.effort { flex: 1 1 auto; }
 
 /* A plain checkbox drawn as a switch; keyboard and screen readers treat it as the checkbox it is. */
 .switch { appearance: none; flex: none; position: relative; width: 36px; height: 20px; margin: 2px 0 0; border-radius: 999px;

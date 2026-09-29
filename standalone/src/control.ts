@@ -16,19 +16,27 @@ const adminJob = z.looseObject({
   id: z.string(), action: z.string(), status: z.enum(["running", "done", "failed"]),
 });
 const session = z.object({ token: z.string().min(1) });
+const adminModels = z.looseObject({
+  backends: z.array(z.looseObject({ name: z.string(), editable: z.boolean(), model: z.string(), reasoning: z.string(), running: z.boolean() })),
+  routes: z.record(z.string(), z.array(z.string())),
+  efforts: z.array(z.string()),
+  choices: z.array(z.looseObject({ id: z.string(), name: z.string(), inputPerMillion: z.number().nullable(), outputPerMillion: z.number().nullable() })),
+});
+export type ModelChange = { backend: string; model: string; reasoning: string };
 
 export function tokenMatches(expected: string, supplied: unknown) {
   if (typeof supplied !== "string" || supplied.length !== expected.length) return false;
   return timingSafeEqual(Buffer.from(expected), Buffer.from(supplied));
 }
 
-// This adapter speaks only the local admin's state, job, session, and start/stop
+// This adapter speaks only the local admin's state, job, session, models, start/stop and model
 // routes. It never exposes the upstream session token or arbitrary admin calls.
 export class ControlApi {
   constructor(private readonly config: ControlConfig) {}
 
-  private request(path: "/api/state" | "/api/job" | "/api/session" | "/api/action",
-                  method: "GET" | "POST" = "GET", body?: { action: "start" | "stop" }, adminToken?: string): Promise<unknown> {
+  private request(path: "/api/state" | "/api/job" | "/api/session" | "/api/action" | "/api/models",
+                  method: "GET" | "POST" = "GET", body?: { action: "start" | "stop" } | ({ action: "model" } & ModelChange),
+                  adminToken?: string): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const target = new URL(path, this.config.origin);
       const transport = target.protocol === "https:" ? https : http;
@@ -91,6 +99,20 @@ export class ControlApi {
     const parsed = adminJob.safeParse(response);
     if (!parsed.success) throw new Error("Admin returned an invalid job");
     return { id: parsed.data.id, action: parsed.data.action, status: parsed.data.status };
+  }
+
+  async models() {
+    const parsed = adminModels.safeParse(await this.request("/api/models"));
+    if (!parsed.success) throw new Error("Admin returned invalid models");
+    return parsed.data;
+  }
+
+  async setModel(change: ModelChange) {
+    const parsed = session.safeParse(await this.request("/api/session"));
+    if (!parsed.success) throw new Error("Admin session unavailable");
+    const response = adminJob.safeParse(await this.request("/api/action", "POST", { action: "model", ...change }, parsed.data.token));
+    if (!response.success) throw new Error("Admin did not accept the operation");
+    return { id: response.data.id, action: response.data.action, status: response.data.status };
   }
 
   async action(action: "start" | "stop") {

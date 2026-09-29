@@ -80,6 +80,44 @@ await test("control routes project status and forward only authorized start/stop
   assert.deepEqual(seen, ["GET /api/state", "GET /api/job", "GET /api/session", "POST /api/action", "GET /api/job", "GET /api/session", "POST /api/action"]);
 });
 
+await test("models are read through and a change forwards only backend, model and reasoning", async t => {
+  const admin = Fastify();
+  const actions: unknown[] = [];
+  const listed = {
+    backends: [{ name: "openrouter-quality", editable: true, model: "anthropic/claude-sonnet-5.5", reasoning: "low", running: true }],
+    routes: { quality: ["openrouter-quality", "openrouter"] },
+    efforts: ["minimal", "low", "medium", "high"],
+    choices: [{ id: "anthropic/claude-sonnet-5.5", name: "Claude Sonnet 5.5", inputPerMillion: 2, outputPerMillion: 10 }],
+  };
+  admin.get("/api/models", () => listed);
+  admin.get("/api/session", () => ({ token: "private-admin-session" }));
+  admin.post("/api/action", (request, reply) => {
+    assert.equal(request.headers["x-admin-token"], "private-admin-session");
+    actions.push(request.body);
+    return reply.code(202).send({ id: "7", action: "model", status: "running" });
+  });
+  const address = await admin.listen({ host: "127.0.0.1", port: 0 });
+  const app = createServer(readConfig({
+    DASHBOARD_CONTROL_URL: address, DASHBOARD_CONTROL_HOST_HEADER: "127.0.0.1:8789", DASHBOARD_CONTROL_TOKEN: access,
+  }));
+  t.after(async () => { await app.close(); await admin.close(); });
+  const inject = (method: "GET" | "POST", url: string, payload?: unknown, token = access) =>
+    app.inject({ method, url, ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
+      headers: { "x-control-token": token, ...(payload === undefined ? {} : { "content-type": "application/json" }) } });
+
+  assert.equal((await inject("GET", "/api/server/models", undefined, "wrong")).statusCode, 401);
+  assert.deepEqual((await inject("GET", "/api/server/models")).json<unknown>(), listed);
+  const change = { backend: "openrouter-quality", model: "anthropic/claude-opus-5.5", reasoning: "low" };
+  assert.equal((await inject("POST", "/api/server/model", { ...change, model: "not a model" })).statusCode, 400);
+  assert.equal((await inject("POST", "/api/server/model", { ...change, reasoning: "max" })).statusCode, 400);
+  assert.equal((await inject("POST", "/api/server/model", { ...change, extra: 1 })).statusCode, 400);
+  assert.equal((await inject("POST", "/api/server/model", change, "wrong")).statusCode, 401);
+  assert.deepEqual(actions, []);
+  const accepted = await inject("POST", "/api/server/model", change);
+  assert.deepEqual(accepted.json<unknown>(), { id: "7", action: "model", status: "running" });
+  assert.deepEqual(actions, [{ action: "model", ...change }]);
+});
+
 await test("control reports unavailable admin without leaking upstream details", async t => {
   const admin = Fastify();
   admin.get("/api/state", () => ({ error: "secret path C:/private" }));

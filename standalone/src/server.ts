@@ -47,6 +47,25 @@ export function createServer(config: Config) {
     try { return await control.action(body.data.action); }
     catch { return reply.code(503).send({ error: "Management service did not accept the operation; check its job status" }); }
   });
+  app.get("/api/server/models", async (request, reply) => {
+    const status = authorize(request);
+    if (status !== 200 || !control) return reply.code(status).send({ error: status === 503 ? "Server management is not configured" : "Access denied" });
+    try { return await control.models(); }
+    catch { return reply.code(503).send({ error: "Management service unavailable" }); }
+  });
+  app.post("/api/server/model", async (request, reply) => {
+    const status = authorize(request);
+    if (status !== 200 || !control) return reply.code(status).send({ error: status === 503 ? "Server management is not configured" : "Access denied" });
+    // The admin validates against what it manages and what OpenRouter lists; this only bounds the shape.
+    const body = z.strictObject({
+      backend: z.string().regex(/^[a-z0-9-]{1,60}$/),
+      model: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,60}\/[a-z0-9][a-z0-9._:-]{0,100}$/),
+      reasoning: z.enum(["minimal", "low", "medium", "high"]),
+    }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "Expected a backend, an OpenRouter model id and a reasoning level" });
+    try { return await control.setModel(body.data); }
+    catch { return reply.code(503).send({ error: "Management service did not accept the operation; check its job status" }); }
+  });
   for (const path of ["/bots", "/worldmap", "/commands", "/health", "/settings"] as const) {
     app.get(path, async (_request, reply) => {
       try { return await world.read(path); }
