@@ -80,6 +80,12 @@ so files added by later features need no list kept in step. Character detail pat
 IDs. Dot paths, directory listing, private database files, and symlinks escaping
 the selected root are refused. Configure trusted, dedicated public directories.
 JSON files must parse; their existing per-feature UI contracts remain unchanged.
+
+Live data proxied from the worldserver: `/bots`, `/worldmap`, `/commands`,
+`/health` and `/settings` (the Settings panel's keys and values, validated like
+the rest). Writes go to `/cmd/pause`, `/cmd/resume` and `/cmd/setting`, which
+forward only the body and the `X-Dashboard-Token` header, once, with no redirect.
+The worldserver decides which setting keys may change (`Dashboard.Settings.Keys`).
 Live responses are runtime-validated using schemas derived from the C++ API.
 Responses and requests are bounded, and redirects are never followed.
 

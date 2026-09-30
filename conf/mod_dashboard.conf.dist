@@ -44,6 +44,48 @@ Dashboard.WebRoot =
 #     Default:     "" (commands off)
 Dashboard.CommandToken = ""
 
+# Dashboard.Settings.Keys
+#     Description: Comma-separated config keys the page's Settings panel shows,
+#                  with their current values (GET /settings). Only these keys
+#                  can be changed from the page. Empty turns the panel off.
+#                  Example: OllamaChat.Conversation.Enable,OllamaChat.Delivery.Split
+#     Default:     "" (off)
+Dashboard.Settings.Keys = ""
+
+# Dashboard.Settings.File
+#     Description: The config file those keys are written to when changed from
+#                  the page (POST /cmd/setting, which needs the command token).
+#                  A relative path is found beside worldserver.conf, e.g.
+#                  modules/mod_ollama_chat.conf. One backup is kept beside it as
+#                  <file>.dashboard.bak. Empty leaves the panel read-only. If your
+#                  config files are generated from another source, record the
+#                  change there too, or the next regeneration undoes it.
+#     Default:     "" (read-only)
+Dashboard.Settings.File = ""
+
+# Dashboard.Settings.ReloadCommand
+#     Description: Console command queued after a change, so it takes effect
+#                  without a restart, e.g. "ollama reload". Empty: the change
+#                  waits for the next reload or restart.
+#     Default:     ""
+Dashboard.Settings.ReloadCommand = ""
+
+# Optional named groups for settings stored in different module files. Group
+# names contain letters, digits or underscores. A key must belong to only one
+# group; ambiguous keys are excluded. The legacy Keys/File/ReloadCommand above
+# remains supported. Keep groups empty to leave all settings disabled.
+# Configure only keys supported by your installed modules. Never expose secrets.
+# Example (requires the conversation and persistent-progression module changes):
+# Dashboard.Settings.Groups = chat,playerbots
+# Dashboard.Settings.chat.Keys = OllamaChat.Conversation.Enable,OllamaChat.Conversation.HoldSeconds,OllamaChat.Conversation.HoldStill,OllamaChat.Delivery.Split
+# Dashboard.Settings.chat.File = modules/mod_ollama_chat.conf
+# Dashboard.Settings.chat.ReloadCommand = ollama reload
+# Dashboard.Settings.playerbots.Keys = AiPlayerbot.PersistentProgression,AiPlayerbot.LevelBrackets.Enabled,AiPlayerbot.ResetBotLevel.Enabled
+# Dashboard.Settings.playerbots.File = modules/playerbots.conf
+# Dashboard.Settings.playerbots.ReloadCommand = reload config
+# A blank ReloadCommand saves without activating; the panel shows the pending value.
+Dashboard.Settings.Groups = ""
+
 # Dashboard.PauseTeleportHoldSec
 #     Description: On pause, the random-bot teleport timer is pushed this far out
 #                  so the bot is not moved away. Resume reschedules it normally.

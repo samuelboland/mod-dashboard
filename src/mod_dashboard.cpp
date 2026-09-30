@@ -7,6 +7,8 @@
 // the queue; the queue is drained in the same OnUpdate. HTTP threads never
 // touch a game object.
 
+#include "mod_dashboard_settings.h"
+
 #include "Config.h"
 #include "DBCStores.h"
 #include "Group.h"
@@ -17,6 +19,7 @@
 #include "BuiltInConfig.h"
 #include "ScriptMgr.h"
 #include "UpdateTime.h"
+#include "World.h"
 #include "WorldSession.h"
 
 #include "PlayerbotAI.h"
@@ -33,7 +36,9 @@
 #include <chrono>
 #include <ctime>
 #include <deque>
+#include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -124,6 +129,8 @@ namespace
         uint64 id = 0;
         std::string cmd;
         uint32 guid = 0;
+        std::string key;     // "setting" only
+        std::string value;   // "setting" only
         std::string from;
         std::promise<json> result;
     };
@@ -133,6 +140,24 @@ namespace
     std::atomic<size_t> s_pending{ 0 };
     std::atomic<uint64> s_nextId{ 1 };
     constexpr size_t QUEUE_LIMIT = 32;
+
+    // ---- Settings (Dashboard.Settings.*) ---------------------------------
+    //
+    // A short list of config keys the page may show and, with the command
+    // token, change. Values are read on the world thread only -- ConfigMgr's
+    // getters take no lock, and a reload rewrites the map under them -- and
+    // published as a finished string like /bots. A change rewrites the key in
+    // Dashboard.Settings.File and queues Dashboard.Settings.ReloadCommand on the
+    // console queue, the way a console or SOAP command runs.
+    std::vector<std::string> s_settingKeys;   // guarded by s_dataLock
+    struct SettingTarget
+    {
+        std::string file;
+        std::string reload;
+    };
+    std::unordered_map<std::string, SettingTarget> s_settingTargets; // world thread
+    std::unordered_map<std::string, std::string> s_savedSettings;   // pending reload, world thread
+    std::shared_ptr<std::string const> s_settings;
 
     // World thread only.
     struct PauseState
@@ -264,6 +289,75 @@ namespace
         return Result(true, "Resumed " + player->GetName() + "; " + std::to_string(restored) + " strategies restored", 200);
     }
 
+    // World thread. Publish active values and any changes still awaiting activation.
+    std::string BuildSettings()
+    {
+        bool commands;
+        {
+            std::lock_guard<std::mutex> lock(s_dataLock);
+            commands = !s_token.empty();
+        }
+        json list = json::array();
+        bool writable = false;
+        for (auto const& [key, target] : s_settingTargets)
+        {
+            std::string active = sConfigMgr->GetOption<std::string>(key, "", false);
+            auto saved = s_savedSettings.find(key);
+            if (saved != s_savedSettings.end() && saved->second == active)
+            {
+                s_savedSettings.erase(saved);
+                saved = s_savedSettings.end();
+            }
+            bool canWrite = commands && !target.file.empty();
+            writable = writable || canWrite;
+            json row = { { "key", key }, { "value", active }, { "writable", canWrite },
+                         { "file", std::filesystem::path(target.file).filename().string() },
+                         { "reload", target.reload } };
+            if (saved != s_savedSettings.end())
+                row["saved"] = saved->second;
+            list.push_back(std::move(row));
+        }
+        return Dump({ { "enabled", !list.empty() }, { "writable", writable },
+                      { "file", "" }, { "reload", "" }, { "settings", list } });
+    }
+
+    void PrintCliLine(void*, std::string_view text)
+    {
+        if (!text.empty())
+            LOG_INFO("module", "[Dashboard] reload: {}", text);
+    }
+
+    void CliFinished(void*, bool success)
+    {
+        if (!success)
+            LOG_WARN("module", "[Dashboard] the settings reload command did not succeed");
+    }
+
+    // World thread. Recheck the allowlist here: it may have changed since enqueue.
+    json DoSetting(std::string const& key, std::string const& value)
+    {
+        {
+            std::lock_guard<std::mutex> lock(s_dataLock);
+            if (s_token.empty())
+                return Result(false, "Commands have been disabled", 403);
+        }
+        auto found = s_settingTargets.find(key);
+        if (found == s_settingTargets.end())
+            return Result(false, "Setting is no longer allowed", 403);
+        SettingTarget const target = found->second;
+        if (target.file.empty())
+            return Result(false, "This setting has no writable config file", 409);
+        std::string error = DashboardSettings::Write(target.file, key, value);
+        if (!error.empty())
+            return Result(false, error, 500);
+        s_savedSettings[key] = value;
+        if (target.reload.empty())
+            return Result(true, "Saved " + key + "; a reload or restart is required", 200);
+
+        sWorld->QueueCliCommand(new CliCommandHolder(nullptr, target.reload.c_str(), &PrintCliLine, &CliFinished));
+        return Result(true, "Saved " + key + "; queued '" + target.reload + "'. Check the active value after reload.", 200);
+    }
+
     void Remember(json entry)
     {
         std::lock_guard<std::mutex> lock(s_dataLock);
@@ -353,6 +447,8 @@ namespace
                     result = DoPause(command->guid);
                 else if (command->cmd == "resume")
                     result = DoResume(command->guid);
+                else if (command->cmd == "setting")
+                    result = DoSetting(command->key, command->value);
                 else
                     result = Result(false, "Unknown command", 400);
             }
@@ -362,13 +458,16 @@ namespace
             }
 
             result["id"] = command->id;
-            LOG_INFO("module", "[Dashboard] command #{} {} guid={} from {} -> {}: {}", command->id, command->cmd,
-                command->guid, command->from, result["ok"].get<bool>() ? "ok" : "refused",
-                result["message"].get<std::string>());
+            LOG_INFO("module", "[Dashboard] command #{} {} {} from {} -> {}: {}", command->id, command->cmd,
+                command->cmd == "setting" ? command->key : "guid=" + std::to_string(command->guid),
+                command->from, result["ok"].get<bool>() ? "ok" : "refused", result["message"].get<std::string>());
 
-            Remember({ { "id", command->id }, { "ts", static_cast<int64>(std::time(nullptr)) },
-                       { "cmd", command->cmd }, { "guid", command->guid }, { "from", command->from },
-                       { "ok", result["ok"] }, { "message", result["message"] } });
+            json entry = { { "id", command->id }, { "ts", static_cast<int64>(std::time(nullptr)) },
+                           { "cmd", command->cmd }, { "guid", command->guid }, { "from", command->from },
+                           { "ok", result["ok"] }, { "message", result["message"] } };
+            if (command->cmd == "setting")
+                entry["key"] = command->key;
+            Remember(std::move(entry));
             command->result.set_value(std::move(result));
         }
     }
@@ -568,6 +667,65 @@ namespace
         SendJson(res, status, result);
     }
 
+    // HTTP thread. Same token rule as the bot commands; the key must be one the
+    // page was given, and the value one line with no double quote (the core's
+    // parser strips every '"', so one could never be read back as written).
+    void HandleSetting(httplib::Request const& req, httplib::Response& res)
+    {
+        std::vector<std::string> keys;
+        bool configured;
+        {
+            std::lock_guard<std::mutex> lock(s_dataLock);
+            configured = !s_token.empty();
+            keys = s_settingKeys;
+        }
+        if (!configured)
+            return SendJson(res, 403, Result(false, "Commands are off: Dashboard.CommandToken is empty", 403));
+        if (!TokenMatches(req.get_header_value("X-Dashboard-Token")))
+        {
+            LOG_WARN("module", "[Dashboard] rejected setting from {}: bad or missing token", req.remote_addr);
+            return SendJson(res, 401, Result(false, "Missing or wrong token", 401));
+        }
+
+        json body = json::parse(req.body, nullptr, false);
+        if (body.is_discarded() || !body.is_object() || !body.contains("key") || !body["key"].is_string() ||
+            !body.contains("value") || !(body["value"].is_string() || body["value"].is_number() || body["value"].is_boolean()))
+            return SendJson(res, 400, Result(false, "Body must be JSON like {\"key\": \"Some.Key\", \"value\": \"1\"}", 400));
+
+        std::string key = body["key"].get<std::string>();
+        if (std::find(keys.begin(), keys.end(), key) == keys.end())
+            return SendJson(res, 403, Result(false, key + " is not in Dashboard.Settings.Keys", 403));
+
+        std::string value = body["value"].is_string() ? body["value"].get<std::string>()
+                          : body["value"].is_boolean() ? (body["value"].get<bool>() ? "1" : "0")
+                          : body["value"].dump();
+        if (!DashboardSettings::ValidValue(value))
+            return SendJson(res, 400, Result(false, "The value must be one line, without double quotes", 400));
+
+        auto command = std::make_shared<Command>();
+        command->id = s_nextId++;
+        command->cmd = "setting";
+        command->key = std::move(key);
+        command->value = std::move(value);
+        command->from = req.remote_addr;
+        std::future<json> future = command->result.get_future();
+
+        {
+            std::lock_guard<std::mutex> lock(s_cmdLock);
+            if (s_queue.size() >= QUEUE_LIMIT)
+                return SendJson(res, 429, Result(false, "Command queue is full; try again", 429));
+            s_queue.push_back(command);
+            s_pending = s_queue.size();
+        }
+
+        if (future.wait_for(std::chrono::seconds(4)) != std::future_status::ready)
+            return SendJson(res, 504, { { "ok", false }, { "id", command->id },
+                { "message", "Queued, but the world thread did not answer within 4 s; check /commands" } });
+
+        json result = future.get();
+        SendJson(res, result.value("status", 200), result);
+    }
+
     void StartListeners()
     {
         std::string bind = sConfigMgr->GetOption<std::string>("Dashboard.Bind", "127.0.0.1");
@@ -595,7 +753,7 @@ namespace
             auto server = std::make_unique<httplib::Server>();
             server->set_read_timeout(5, 0);
             server->set_write_timeout(5, 0);
-            server->set_payload_max_length(1024);
+            server->set_payload_max_length(4096);   // a setting's value can be a prompt line
 
             server->Get("/bots", [](httplib::Request const&, httplib::Response& res) { ServeString(res, Load(s_bots)); });
             server->Get("/worldmap", [](httplib::Request const&, httplib::Response& res) { ServeString(res, Load(s_worldmap)); });
@@ -617,6 +775,8 @@ namespace
             });
             server->Post("/cmd/pause", [](httplib::Request const& req, httplib::Response& res) { HandleCommand("pause", req, res); });
             server->Post("/cmd/resume", [](httplib::Request const& req, httplib::Response& res) { HandleCommand("resume", req, res); });
+            server->Get("/settings", [](httplib::Request const&, httplib::Response& res) { ServeString(res, Load(s_settings)); });
+            server->Post("/cmd/setting", [](httplib::Request const& req, httplib::Response& res) { HandleSetting(req, res); });
 
             // Blizzard-derived map images live outside the module source so they
             // can never be committed with it.
@@ -672,8 +832,57 @@ public:
             LOG_ERROR("module", "[Dashboard] CommandToken is shorter than 16 characters; commands stay off");
             token.clear();
         }
+
+        std::vector<std::string> keys;
+        std::unordered_map<std::string, SettingTarget> targets;
+        std::set<std::string> ambiguous;
+        auto words = [](std::string const& text)
+        {
+            std::vector<std::string> result;
+            std::stringstream stream(text);
+            for (std::string word; std::getline(stream, word, ','); )
+            {
+                word.erase(0, word.find_first_not_of(" \t"));
+                word.erase(word.find_last_not_of(" \t") + 1);
+                if (!word.empty() && std::find(result.begin(), result.end(), word) == result.end())
+                    result.push_back(std::move(word));
+            }
+            return result;
+        };
+        auto addGroup = [&](std::string const& prefix)
+        {
+            std::string file = sConfigMgr->GetOption<std::string>(prefix + ".File", "");
+            if (!file.empty() && std::filesystem::path(file).is_relative())
+                file = (std::filesystem::path(sConfigMgr->GetConfigPath()) / file).string();
+            std::string reload = sConfigMgr->GetOption<std::string>(prefix + ".ReloadCommand", "");
+            for (std::string const& key : words(sConfigMgr->GetOption<std::string>(prefix + ".Keys", "")))
+            {
+                if (!targets.emplace(key, SettingTarget{ file, reload }).second)
+                    ambiguous.insert(key);
+            }
+        };
+        addGroup("Dashboard.Settings"); // Single-file configuration remains supported.
+        for (std::string const& group : words(sConfigMgr->GetOption<std::string>("Dashboard.Settings.Groups", "")))
+        {
+            if (!std::all_of(group.begin(), group.end(), [](unsigned char c) { return std::isalnum(c) || c == '_'; }))
+            {
+                LOG_ERROR("module", "[Dashboard] Invalid settings group '{}'", group);
+                continue;
+            }
+            addGroup("Dashboard.Settings." + group);
+        }
+        for (std::string const& key : ambiguous)
+        {
+            targets.erase(key);
+            LOG_ERROR("module", "[Dashboard] Setting '{}' belongs to multiple groups; excluded", key);
+        }
+        for (auto const& [key, target] : targets)
+            keys.push_back(key);
+        s_settingTargets = std::move(targets);
+
         std::lock_guard<std::mutex> lock(s_dataLock);
         s_token = std::move(token);
+        s_settingKeys = std::move(keys);
     }
 
     void OnStartup() override
@@ -708,6 +917,9 @@ public:
         {
             MaintainPauses();
             Store(s_bots, BuildSnapshot());
+            // Rebuilt every interval: a reload run from the console or another
+            // module changes these values without telling this one.
+            Store(s_settings, BuildSettings());
         }
         catch (std::exception const& e)
         {

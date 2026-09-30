@@ -10,7 +10,7 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test",
-    "test": "tsx --test test/*.test.ts && node --test ../tests/accounting.test.mjs ../tests/connection.test.mjs",
+    "test": "tsx --test test/*.test.ts && node --test ../tests/accounting.test.mjs ../tests/connection.test.mjs ../tests/settings.test.mjs",
     "check": "npm run typecheck && npm run lint && npm test && npm run build"
   },
   "dependencies": {

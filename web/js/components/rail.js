@@ -16,6 +16,7 @@ export const PANELS = [
   { id: "lore", icon: "scroll", label: "Lore", title: "Your own lore", desc: "Write your characters' story, and let the world check it" },
   { id: "memories", icon: "book", label: "Memories", title: "Memories", desc: "What the bots still carry: their deeds and what they made of them" },
   { id: "journey", icon: "route", label: "Journey", title: "A player's journey", desc: "Everything one character has done, in the order it happened" },
+  { id: "settings", icon: "sliders", label: "Settings", title: "Settings", desc: "Bot progression and conversation settings" },
 ];
 
 export function mountRail(rail, dock) {

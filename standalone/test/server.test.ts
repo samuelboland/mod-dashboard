@@ -124,7 +124,7 @@ await test("live reads validate responses and recover; command auth and outcomes
   assert.equal((await send("correct", { guid: 18, cmd: "other" })).statusCode, 400);
   assert.equal((await send("correct", { guid: 18 }, "http://evil.example")).statusCode, 403);
   assert.equal(received, 0);
-  const oversized = await app.inject({ method: "POST", url: "/cmd/pause", payload: { text: "x".repeat(2048) } });
+  const oversized = await app.inject({ method: "POST", url: "/cmd/pause", payload: { text: "x".repeat(5000) } });
   assert.equal(oversized.statusCode, 413);
   assert.equal((await send("wrong")).statusCode, 401);
   assert.equal(seenToken, "wrong");
@@ -135,6 +135,45 @@ await test("live reads validate responses and recover; command auth and outcomes
   assert.deepEqual(queued.json<unknown>(), { ok: false, id: 42, message: "Queued; check /commands" });
   assert.equal(received, 3);
   assert.equal((await app.inject({ method: "POST", url: "/cmd/delete", payload: {} })).statusCode, 404);
+});
+
+await test("settings are read through and changed with only the key, value and token forwarded", async t => {
+  const upstream = Fastify();
+  const listed = { enabled: true, writable: true, file: "mod_ollama_chat.conf", reload: "ollama reload",
+    settings: [{ key: "OllamaChat.Conversation.Enable", value: "1", writable: true, file: "mod_ollama_chat.conf", reload: "ollama reload" },
+      { key: "AiPlayerbot.PersistentProgression", value: "0", saved: "1", writable: true, file: "playerbots.conf", reload: "reload config" }] };
+  let received: unknown[] = [];
+  let seenToken: unknown;
+  upstream.get("/settings", () => listed);
+  upstream.post("/cmd/setting", (request, reply) => {
+    received.push(request.body);
+    seenToken = request.headers["x-dashboard-token"];
+    if (seenToken !== "correct") return reply.code(401).send({ ok: false, message: "Missing or wrong token" });
+    return { ok: true, message: "Saved", id: 7 };
+  });
+  const address = await upstream.listen({ host: "127.0.0.1", port: 0 });
+  const app = createServer(readConfig({ DASHBOARD_WORLD_URL: address }));
+  t.after(async () => { await app.close(); await upstream.close(); });
+  assert.deepEqual((await app.inject("/settings")).json<unknown>(), listed);
+  const send = (token: string, payload: unknown, origin?: string) => app.inject({
+    method: "POST", url: "/cmd/setting", payload: JSON.stringify(payload),
+    headers: { "content-type": "application/json", "x-dashboard-token": token, ...(origin ? { origin } : {}) },
+  });
+  const change = { key: "OllamaChat.Conversation.Enable", value: "0" };
+  assert.equal((await send("", change)).statusCode, 401);
+  assert.equal((await send("correct", { key: "", value: "0" })).statusCode, 400);
+  assert.equal((await send("correct", { ...change, extra: 1 })).statusCode, 400);
+  assert.equal((await send("correct", { key: "k", value: "x".repeat(2001) })).statusCode, 400);
+  assert.equal((await send("correct", { key: "k", value: "a\nb" })).statusCode, 400);
+  assert.equal((await send("correct", { key: "k", value: "a\0b" })).statusCode, 400);
+  assert.equal((await send("correct", change, "http://evil.example")).statusCode, 403);
+  assert.equal(received.length, 0);
+  assert.equal((await send("wrong", change)).statusCode, 401);
+  const saved = await send("correct", change);
+  assert.equal(saved.statusCode, 200);
+  assert.deepEqual(saved.json<unknown>(), { ok: true, message: "Saved", id: 7 });
+  assert.deepEqual(received, [change, change]);
+  received = [];
 });
 
 await test("command timeouts are bounded and never retried or redirected", async t => {
