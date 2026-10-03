@@ -1,0 +1,32 @@
+/* Dungeon Master panel (components/dm.js). */
+
+.dm-body { padding: 2px 12px 12px; }
+.dm-boss + .dm-boss { margin-top: 12px; padding-top: 10px; box-shadow: inset 0 1px 0 var(--line); }
+.dm-boss-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink); }
+.dm-boss-head .pill { height: 20px; padding: 0 8px; font-size: 11px; }
+.dm-boss-head .pill.dm-warm { color: var(--warm); border-color: color-mix(in srgb, var(--warm) 30%, transparent); background: color-mix(in srgb, var(--warm) 11%, transparent); }
+.dm-boss-head .pill.dm-cold { color: var(--cold); border-color: color-mix(in srgb, var(--cold) 30%, transparent); background: color-mix(in srgb, var(--cold) 11%, transparent); }
+.dm-lat { margin-left: auto; font-size: 11px; }
+.dm-said { display: flex; gap: 6px; align-items: baseline; margin: 7px 0 4px; padding: 6px 8px; border-radius: 8px;
+  background: var(--gold-wash); font-size: 12px; color: var(--ink-2); }
+.dm-said .ico { color: var(--gold-text); flex: none; }
+.dm-said q { font-family: var(--font-prose); font-size: 13px; color: var(--ink); quotes: "“" "”"; }
+.dm-also { margin: 8px 0 0; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.dm-lines { list-style: none; margin: 3px 0 0; padding: 0; }
+.dm-line { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
+.dm-rank { flex: none; width: 13px; font-size: 10.5px; color: var(--ink-3); text-align: center; font-variant-numeric: tabular-nums; }
+.dm-words { font-family: var(--font-prose); font-size: 13px; line-height: 1.45; color: var(--ink-2); }
+.dm-none { margin-top: 6px; font-size: 12px; }
+
+.dm-inn { grid-column: 2 / 4; list-style: none; margin: 2px 0 0; padding: 0; }
+.dm-inn li { padding: 2px 0 2px 10px; border-left: 2px solid var(--line-2); }
+.dm-inn li + li { margin-top: 3px; }
+.dm-inn li.said { border-left-color: var(--gold-line); }
+.dm-inn li.said .dm-words { color: var(--ink); }
+.dm-inn li.expired .dm-words { text-decoration: line-through; color: var(--ink-3); }
+
+.dm-fb { padding: 8px 6px; }
+.dm-fb + .dm-fb { box-shadow: inset 0 1px 0 var(--line); }
+.dm-fb-head { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; color: var(--ink); margin-bottom: 4px; }
+.dm-fb-head .muted { font-size: 11.5px; }
+.dm-fb .dm-inn { margin: 0; }
