@@ -19,7 +19,12 @@ export const PANELS = [
   { id: "memories", icon: "book", label: "Memories", title: "Memories", desc: "What the bots still carry: their deeds and what they made of them" },
   { id: "journey", icon: "route", label: "Journey", title: "A player's journey", desc: "Everything one character has done, in the order it happened" },
   { id: "settings", icon: "sliders", label: "Settings", title: "Settings", desc: "Bot progression and conversation settings" },
+  { id: "models", icon: "layers", label: "Models", title: "Models", desc: "Which language model each part of the realm uses, and in what order" },
 ];
+
+// Optional panels appear only when the thing behind them says it is on. Models: the lore gate publishes
+// `model_settings` in lore-edit.json, and only when MODEL_SETTINGS_ENABLED=1.
+const modelsOn = () => state.loreEdit?.model_settings === true;
 
 export function mountRail(rail, dock) {
   const buttons = new Map(PANELS.map(p => [p.id,
@@ -35,11 +40,11 @@ export function mountRail(rail, dock) {
   dock.replaceChildren(h("div.dock-head", title, desc), h("div.dock-body", Object.values(panels)));
 
   const sync = () => {
-    const current = PANELS.find(p => p.id === state.panel) || PANELS[0];
+    const current = PANELS.find(p => p.id === state.panel && (p.id !== "models" || modelsOn())) || PANELS[0];
     title.textContent = current.title;
     desc.textContent = current.desc;
     for (const [id, b] of buttons) {
-      b.hidden = id === "server" && !state.controlAvailable;
+      b.hidden = (id === "server" && !state.controlAvailable) || (id === "models" && !modelsOn());
       const on = id === current.id && state.dockOpen;
       b.classList.toggle("on", on);
       b.setAttribute("aria-pressed", String(on));
@@ -48,7 +53,7 @@ export function mountRail(rail, dock) {
     collapse.title = state.dockOpen ? "Hide the side panel" : "Show the side panel";
     document.getElementById("app").classList.toggle("dock-closed", !state.dockOpen);
   };
-  on("panel host-capabilities", sync);
+  on("panel host-capabilities loreEdit", sync);
   sync();
   return panels;
 }

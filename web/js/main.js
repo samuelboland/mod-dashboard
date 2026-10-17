@@ -25,6 +25,7 @@ import { mountJourney } from "./components/journey.js";
 import { mountJourneyFull } from "./components/journey-full.js";
 import { mountInspector } from "./components/inspector.js";
 import { mountSettings } from "./components/settings.js";
+import { mountModels } from "./components/models.js";
 
 import { mountAccounting } from "./components/accounting.js";
 import { hasServerControl } from "./lib/host.js";
@@ -50,6 +51,7 @@ mountLore(panels.lore);
 mountMemories(panels.memories);
 mountJourney(panels.journey);
 mountSettings(panels.settings);
+mountModels(panels.models);
 mountInspector($("inspector"));
 mountChronicleReader(document.body);
 mountFeelingsFull(document.body);

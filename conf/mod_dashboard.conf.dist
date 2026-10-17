@@ -77,7 +77,9 @@ Dashboard.Settings.ReloadCommand = ""
 # Configure only keys supported by your installed modules. Never expose secrets.
 # Example (requires the conversation and persistent-progression module changes):
 # Dashboard.Settings.Groups = chat,playerbots
-# Dashboard.Settings.chat.Keys = OllamaChat.Conversation.Enable,OllamaChat.Conversation.HoldSeconds,OllamaChat.Conversation.HoldStill,OllamaChat.Delivery.Split
+# Dashboard.Settings.chat.Keys = OllamaChat.Conversation.Enable,OllamaChat.Conversation.HoldSeconds,OllamaChat.Conversation.HoldStill,OllamaChat.Delivery.Split,OllamaChat.Reply.Model
+# Dashboard.Settings.chat.Types = OllamaChat.Reply.Model:text
+#   (OllamaChat.Reply.Model names the model, or a router route, that answers a real player; see MODELS.md)
 # Dashboard.Settings.chat.File = modules/mod_ollama_chat.conf
 # Dashboard.Settings.chat.ReloadCommand = ollama reload
 # Dashboard.Settings.playerbots.Keys = AiPlayerbot.PersistentProgression,AiPlayerbot.PersistentProgression.AnchorOnMeeting,AiPlayerbot.PersistentProgression.FollowGap,AiPlayerbot.PersistentProgression.AnchorInterval,AiPlayerbot.LevelBrackets.Enabled,AiPlayerbot.ResetBotLevel.Enabled

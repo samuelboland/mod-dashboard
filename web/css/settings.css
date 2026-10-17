@@ -18,3 +18,29 @@
 .switch:checked::after { transform: translateX(16px); background: var(--bg-1, #fff); }
 .switch:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .switch:disabled { opacity: .55; cursor: default; }
+
+/* Models panel: each route's backends in order, each backend's model, and what the router makes of them. */
+.model-route { display: flex; flex-direction: column; gap: 8px; padding: 10px 6px; }
+.model-route + .model-route { box-shadow: inset 0 1px 0 var(--line); }
+.model-head { display: flex; align-items: center; gap: 8px; }
+.model-head b { font-size: 13px; color: var(--ink); }
+.model-chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.model-link { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 5px 6px 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); }
+.model-link.skipped { opacity: .65; }
+.model-n { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; text-align: center; }
+.model-text { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.model-name { font-size: 12.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.model-model { font-size: 11px; color: var(--ink-3); overflow-wrap: anywhere; }
+.model-tools { display: flex; align-items: center; }
+.model-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.model-problem { color: var(--cold); }
+.pill.model-key { height: 18px; padding: 0 7px; font-size: 10.5px; }
+.pill.model-key.set { color: var(--warm); border-color: color-mix(in srgb, var(--warm) 30%, transparent); background: color-mix(in srgb, var(--warm) 11%, transparent); }
+.pill.model-key.missing { color: var(--cold); border-color: color-mix(in srgb, var(--cold) 30%, transparent); background: color-mix(in srgb, var(--cold) 11%, transparent); }
+.model-ro-list { display: flex; flex-direction: column; gap: 6px; padding: 8px 6px; }
+.model-ro { font-size: 12.5px; overflow-wrap: anywhere; }
+.setting-label .pill { margin-left: 4px; vertical-align: middle; }
+.icon-btn.flip .ico { display: inline-grid; transform: rotate(180deg); }
+.model-edit { flex-wrap: wrap; }
+.setting-edit.model-edit .input { flex: 1 1 60%; }

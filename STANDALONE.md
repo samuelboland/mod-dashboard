@@ -71,7 +71,9 @@ and host/protocol; TLS-terminating reverse proxies need additional explicit orig
 configuration before they can support commands in a future change.
 The lore editor still talks directly to its separate port 8788 service and uses
 that service's own token/CORS policy. This PR does not change it; allow the new
-dashboard origin there if your lore-gate installation restricts origins.
+dashboard origin there if your lore-gate installation restricts origins. The
+optional Models panel ([MODELS.md](MODELS.md)) does the same; nothing in this host
+proxies it.
 
 ## Offline behavior
 

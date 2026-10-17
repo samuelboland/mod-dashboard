@@ -26,6 +26,10 @@ Dashboard.Settings.playerbots.File = modules/playerbots.conf
 Dashboard.Settings.playerbots.ReloadCommand = reload config
 ```
 
+In Headless DM, `OllamaChat.Reply.Model` (type `text`) names a router route
+(`ambient`, `quality`, `chronicle`, `prose`, `utility` or `moment`), not a model;
+see [MODELS.md](MODELS.md) for the panel that shows and orders those routes.
+
 Use actual installed config paths, relative to the worldserver config directory
 or absolute. These feature keys require the corresponding conversation and
 persistence module changes. The conversation change also makes `ollama reload`

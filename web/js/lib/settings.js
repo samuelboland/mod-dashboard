@@ -31,7 +31,7 @@ export const KNOWN = {
     help: "0 = no limit." },
   "OllamaChat.MaxReplyLength": { label: "Longest reply (characters)", kind: "int", min: 40, max: 2000, group: "Replies" },
   "OllamaChat.Reply.Model": { label: "Model for replies to players", kind: "text", group: "Replies",
-    help: "The model (or router route) that answers a real player. Empty = the same model as everything else." },
+    help: "The model (or router route) that answers a real player. In Headless DM it names a route: ambient, quality, chronicle, prose, utility or moment (see Models); anything else is answered by ambient. Empty = the same model as everything else." },
   "OllamaChat.Reply.NumPredict": { label: "Reply length budget (tokens)", kind: "int", min: 0, max: 4000, group: "Replies",
     help: "0 = the general token cap." },
   "OllamaChat.PlayerReplyChance.Say": { label: "Chance a bot answers a say (%)", kind: "int", min: 0, max: 100, group: "Chat" },
