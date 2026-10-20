@@ -1,0 +1,91 @@
+/* ---------------------------------------------------------------------------
+   People (people.js) and one person followed closely (person.js), isekai realms.
+   The full-screen shell is the journey's (.jy-overlay, .jy-bar); the system window is drawn after Sword Art
+   Online's: a pale, cool pane that belongs to no one in the world.
+   --------------------------------------------------------------------------- */
+
+:root { --sys: #8fd8ff; --sys-wash: rgba(143, 216, 255, .1); --sys-line: rgba(143, 216, 255, .45); }
+:root[data-theme="light"] { --sys: #0a6fa3; --sys-wash: rgba(10, 111, 163, .08); --sys-line: rgba(10, 111, 163, .4); }
+
+/* ---- the list ---- */
+.pp-row { align-items: flex-start; }
+.pp-row .row-main { gap: 1px; }
+.pp-earth { font-weight: 500; color: var(--ink-2); }
+.pp-said { margin-top: 3px; font-family: var(--font-prose); font-size: 13px; font-style: italic; color: var(--ink-2);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pp-end { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.pp-know { display: inline-flex; color: var(--ink-3); }
+.pp-know.played { color: var(--gold-text); }
+.pp-know.heard { color: var(--warn); }
+.pp-know.guided { color: var(--sys); }
+.pp-token { margin: 6px 0; }
+.pp-token-row { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+
+/* ---- one person ---- */
+.ps-scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+.ps-head { padding: 16px clamp(16px, 3vw, 28px) 12px; background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  border-bottom: 1px solid var(--line); }
+.ps-id { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 16px; max-width: 860px; margin: 0 auto; }
+.ps-id-main { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ps-name { font-family: var(--font-display); font-size: 20px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.ps-earth { font-family: var(--font-ui); font-size: 15px; font-weight: 500; color: var(--ink-2); }
+.ps-sub { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--ink-3); }
+.ps-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.ps-played { color: var(--gold-text); border-color: var(--gold-line); }
+.ps-heard { color: var(--warn); }
+.ps-muted { color: var(--ink-3); font-size: 12px; }
+.ps-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.ps-body { display: flex; flex-direction: column; gap: 12px; max-width: 860px; margin: 0 auto;
+  padding: 14px clamp(16px, 3vw, 28px) 48px; }
+.ps-rest { display: flex; flex-direction: column; gap: 12px; }
+.ps-body .sect-body { display: flex; flex-direction: column; gap: 10px; padding: 4px 14px 14px; }
+.ps-note { margin: 0; font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
+.ps-prose { margin: 0; font-family: var(--font-prose); font-size: 15px; line-height: 1.6; color: var(--ink); }
+.ps-small-prose { font-size: 14px; color: var(--ink-2); }
+.ps-was { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--line-3); }
+.ps-k { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-top: 4px; }
+.ps-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.ps-small { height: 26px; padding: 0 8px; font-size: 11.5px; }
+.ps-from-system { border-left: 2px solid var(--sys-line); padding-left: 10px; }
+
+.ps-kinds { flex-wrap: wrap; }
+.ps-text { width: 100%; min-height: 84px; padding: 10px 12px; resize: vertical; font: inherit; font-size: 14px; line-height: 1.5; }
+.ps-draft { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: var(--radius);
+  background: var(--bg-1); border: 1px solid var(--line-2); }
+.ps-feel { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13.5px; }
+.ps-aside { flex-basis: 100%; font-family: var(--font-prose); color: var(--ink-2); }
+
+/* The window itself. */
+.sys-window { border: 1px solid var(--sys-line); border-radius: 8px; background: linear-gradient(180deg, var(--sys-wash), transparent 140%);
+  box-shadow: 0 0 0 1px var(--sys-wash), 0 6px 24px rgba(0, 0, 0, .25); overflow: hidden; }
+.sys-head { display: flex; align-items: center; gap: 6px; padding: 5px 12px; font-size: 11px; font-weight: 700;
+  letter-spacing: .22em; color: var(--sys); border-bottom: 1px solid var(--sys-line); background: var(--sys-wash); }
+.sys-words { padding: 12px 14px; font-size: 15px; line-height: 1.5; color: var(--ink); letter-spacing: .01em; }
+.sys-window.small .sys-words { padding: 8px 12px; font-size: 13.5px; }
+
+.ps-msg { display: flex; flex-direction: column; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.ps-msg:last-child { border-bottom: 0; padding-bottom: 0; }
+.ps-msg.gone { opacity: .55; }
+.ps-msg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ps-msg-head .btn { margin-left: auto; }
+.ps-asked { font-size: 12.5px; color: var(--ink-2); }
+
+.ps-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13.5px; }
+.ps-facts dt { color: var(--ink-3); }
+.ps-facts dd { margin: 0; color: var(--ink); }
+@media (max-width: 520px) {
+  .ps-facts { grid-template-columns: 1fr; gap: 1px; }
+  .ps-facts dd { margin-bottom: 7px; }
+}
+
+.ps-more summary { cursor: pointer; font-size: 12.5px; color: var(--gold-text); margin: 4px 0; }
+.ps-more .ps-prose + .ps-prose { margin-top: 10px; }
+
+.ps-chat { display: flex; flex-direction: column; gap: 8px; }
+.ps-line { padding: 8px 10px; border-radius: 8px; background: var(--bg-1); font-size: 14px; line-height: 1.45; }
+.ps-line.mine { background: var(--bg-3); }
+.ps-line-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; margin-bottom: 2px; font-size: 12px; }
+.ps-line-head .ts { margin-left: auto; }
+.ps-mem { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; font-size: 13.5px; color: var(--ink); }
+.ps-mem .ts { flex: none; }

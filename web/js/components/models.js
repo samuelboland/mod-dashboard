@@ -13,8 +13,8 @@ import { ROUTE_HELP, APPLIES, checkModel, sameChain, moveBackend, removeBackend,
          chainProblem, keyLabel, usedBy, routerWords } from "../lib/models.js";
 import { section, empty } from "./common.js";
 import { toast } from "./toast.js";
+import { GATE } from "../lib/gate.js";
 
-const GATE = `${location.protocol}//${location.hostname}:8788`;
 const REFRESH_MS = 20000;
 const FOLLOW_MS = 3500;     // after a save: look again until the router says it has the change
 const FOLLOW_TRIES = 4;

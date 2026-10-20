@@ -26,6 +26,8 @@ import { mountJourneyFull } from "./components/journey-full.js";
 import { mountInspector } from "./components/inspector.js";
 import { mountSettings } from "./components/settings.js";
 import { mountModels } from "./components/models.js";
+import { mountPeople } from "./components/people.js";
+import { mountPerson } from "./components/person.js";
 
 import { mountAccounting } from "./components/accounting.js";
 import { hasServerControl } from "./lib/host.js";
@@ -52,12 +54,14 @@ mountMemories(panels.memories);
 mountJourney(panels.journey);
 mountSettings(panels.settings);
 mountModels(panels.models);
+mountPeople(panels.people);
 mountInspector($("inspector"));
 mountChronicleReader(document.body);
 mountFeelingsFull(document.body);
 mountGroupsGrid(document.body);
 mountMemoriesFull(document.body);
 mountJourneyFull(document.body);
+mountPerson(document.body);
 mountMap($("stage"));
 void hasServerControl().then(available => {
   state.controlAvailable = available;

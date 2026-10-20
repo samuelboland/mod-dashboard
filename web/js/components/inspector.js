@@ -35,7 +35,10 @@ function hero(p) {
         icon(p.paused ? "play" : "pause", 14), state.busy ? "Working…" : p.paused ? "Resume" : "Pause"),
       onAnyContinent(p) && h("button.btn", { type: "button", on: { click: () => select(p.guid, true) } }, icon("locate", 14), "Show on map"),
       h("button.btn", { type: "button", title: "Everything they have done, in the order it happened",
-        on: { click: () => emit("open-journey", { guid: p.guid }) } }, icon("route", 14), "Journey")),
+        on: { click: () => emit("open-journey", { guid: p.guid }) } }, icon("route", 14), "Journey"),
+      p.bot && state.loreEdit?.people && state.lore?.[String(p.guid)] && h("button.btn", { type: "button",
+        title: "Who they were, what they say, and a way to reach them", on: { click: () => emit("open-person", { guid: p.guid }) } },
+        icon("eye", 14), "Follow")),
     r && h("div.alert", { class: r.ok ? "ok" : "bad" }, icon(r.ok ? "check" : "alert", 14), h("span", r.text)));
 }
 

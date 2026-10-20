@@ -8,8 +8,8 @@
 import { state, on } from "../state.js";
 import { h, icon, render } from "../lib/dom.js";
 import { section, empty } from "./common.js";
+import { GATE } from "../lib/gate.js";
 
-const GATE = `${location.protocol}//${location.hostname}:8788`;
 const WHAT = { main: "sheet", alt: "backstory", player: "sheet" };
 
 // The gate's token is its own secret, not the dashboard's command token.

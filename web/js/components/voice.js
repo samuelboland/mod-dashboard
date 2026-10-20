@@ -15,8 +15,8 @@ import { localGet } from "../state.js";
 import { h, icon } from "../lib/dom.js";
 import { capital } from "../lib/format.js";
 import { toast } from "./toast.js";
+import { GATE } from "../lib/gate.js";
 
-const GATE = `${location.protocol}//${location.hostname}:8788`;
 const token = () => (localGet("loreToken") || "").trim();
 
 let player = null;         // the one line playing now; a second click stops the first

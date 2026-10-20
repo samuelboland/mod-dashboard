@@ -16,6 +16,7 @@ import { loadJourney } from "../api.js";
 import { empty, kpis, avatar, factionBadge, who as whoLink } from "./common.js";
 import { toast } from "./toast.js";
 import { sayButton, voiceOpen, clipOf, hasVoice, onVoices, playAll, playingQueue, recordAll, exportSection, voicesOn, changeVoice, stop as stopVoices } from "./voice.js";
+import { GATE } from "../lib/gate.js";
 
 const HASH = "#journey";
 const PAGE = 90;              // render-plan rows added each time the foot comes into view
@@ -27,7 +28,6 @@ const BUCKETS = 132;          // bars across the ribbon
 // and answers with a job to watch -- mod-dashboard caps a body at 1024 bytes and never answers a
 // preflight, which is why nothing that writes goes to :8787. The stories themselves are READ from
 // the static /data mount, so a journey can be read back with no token at all.
-const GATE = `${location.protocol}//${location.hostname}:8788`;
 const JOB_POLL = 1500;
 const ENDED_WORDS = {
   disband: "the company broke up",

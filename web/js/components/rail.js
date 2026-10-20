@@ -4,6 +4,7 @@ import { h, icon } from "../lib/dom.js";
 import { setPanel, setDock } from "../actions.js";
 
 export const PANELS = [
+  { id: "people", icon: "eye", label: "People", title: "People", desc: "Every arrival: who they were, what they say, and a way to reach them" },
   { id: "roster", icon: "users", label: "Roster", title: "Roster", desc: "Everyone in the world right now" },
   { id: "feelings", icon: "heart", label: "Feelings", title: "Feelings", desc: "Who has warmed to or cooled on whom" },
   { id: "groups", icon: "handshake", label: "Groups", title: "Groups", desc: "Who is standing together right now, and what they are saying" },
@@ -25,6 +26,8 @@ export const PANELS = [
 // Optional panels appear only when the thing behind them says it is on. Models: the lore gate publishes
 // `model_settings` in lore-edit.json, and only when MODEL_SETTINGS_ENABLED=1.
 const modelsOn = () => state.loreEdit?.model_settings === true;
+// People: the lore gate publishes `people` in lore-edit.json on an isekai realm, where there are arrivals to follow.
+const peopleOn = () => state.loreEdit?.people === true;
 
 export function mountRail(rail, dock) {
   const buttons = new Map(PANELS.map(p => [p.id,
@@ -40,11 +43,12 @@ export function mountRail(rail, dock) {
   dock.replaceChildren(h("div.dock-head", title, desc), h("div.dock-body", Object.values(panels)));
 
   const sync = () => {
-    const current = PANELS.find(p => p.id === state.panel && (p.id !== "models" || modelsOn())) || PANELS[0];
+    const shown = id => (id !== "models" || modelsOn()) && (id !== "people" || peopleOn());
+    const current = PANELS.find(p => p.id === state.panel && shown(p.id)) || PANELS.find(p => shown(p.id));
     title.textContent = current.title;
     desc.textContent = current.desc;
     for (const [id, b] of buttons) {
-      b.hidden = (id === "server" && !state.controlAvailable) || (id === "models" && !modelsOn());
+      b.hidden = (id === "server" && !state.controlAvailable) || !shown(id);
       const on = id === current.id && state.dockOpen;
       b.classList.toggle("on", on);
       b.setAttribute("aria-pressed", String(on));
